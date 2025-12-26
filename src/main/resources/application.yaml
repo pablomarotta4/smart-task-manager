@@ -10,9 +10,15 @@ spring:
 
   flyway:
     enabled: true
-    locations: classpath:db/migrations
+    locations: classpath:db/migration
     baseline-on-migrate: true
     validate-on-migrate: true
+    baseline-version: 0
+    clean-disabled: true
+    baseline-description: "Initial baseline"
+    sql-migration-prefix: V
+    sql-migration-separator: __
+    sql-migration-suffixes: .sql
 
   jpa:
     hibernate:
@@ -25,6 +31,10 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           time_zone: UTC
+
+logging:
+  level:
+    org.flywaydb: DEBUG
 
 server:
   port: 8080
