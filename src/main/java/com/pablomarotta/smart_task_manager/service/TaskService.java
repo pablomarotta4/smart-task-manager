@@ -3,7 +3,9 @@ package com.pablomarotta.smart_task_manager.service;
 import com.pablomarotta.smart_task_manager.dto.TaskRequest;
 import com.pablomarotta.smart_task_manager.dto.TaskResponse;
 import com.pablomarotta.smart_task_manager.dto.UserResponse;
+import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.TaskNotFoundException;
+import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
@@ -11,9 +13,18 @@ import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import com.pablomarotta.smart_task_manager.exception.TaskNotFoundException;
+import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
+import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -27,30 +38,46 @@ public class TaskService {
 
     @Transactional
     public TaskResponse createTask(TaskRequest taskRequest) {
-        var project = projectRepository.findById(taskRequest.getProjectId())
-                .orElseThrow(() -> new RuntimeException("Project not found with id: " + taskRequest.getProjectId()));
-
-        var taskBuilder = Task.builder()
-                .id(null)
-                .title(taskRequest.getTitle())
-                .description(taskRequest.getDescription())
-                .status(taskRequest.getStatus())
-                .project(project)
-                .priority(taskRequest.getPriority())
-                .category(taskRequest.getCategory())
-                .dueDate(taskRequest.getDueDate())
-                .position(taskRequest.getPosition());
-
-        if (taskRequest.getAssigneeId() != null) {
-            var assignee = userRepository.findById(taskRequest.getAssigneeId())
-                    .orElseThrow(() -> new RuntimeException("User not found with id: " + taskRequest.getAssigneeId()));
-            taskBuilder.assignee(assignee);
+        if (taskRequest == null) {
+            throw new IllegalArgumentException("Task request cannot be null");
         }
+        
+        if (taskRequest.getProjectId() == null) {
+            throw new IllegalArgumentException("Project ID is required");
+        }
+        
+        try {
+            var project = projectRepository.findById(taskRequest.getProjectId())
+                    .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + taskRequest.getProjectId()));
 
-        Task task = taskBuilder.build();
-        Task savedTask = taskRepository.save(task);
+            var taskBuilder = Task.builder()
+                    .id(null)
+                    .title(validateTitle(taskRequest.getTitle()))
+                    .description(taskRequest.getDescription())
+                    .status(taskRequest.getStatus() != null ? taskRequest.getStatus() : Status.TODO)
+                    .project(project)
+                    .priority(taskRequest.getPriority())
+                    .category(taskRequest.getCategory())
+                    .dueDate(validateDueDate(taskRequest.getDueDate()))
+                    .position(validatePosition(taskRequest.getPosition()));
 
-        return mapToResponse(savedTask);
+            if (taskRequest.getAssigneeId() != null) {
+                var assignee = userRepository.findById(taskRequest.getAssigneeId())
+                        .orElseThrow(() -> new UserNotFoundException("User not found with id: " + taskRequest.getAssigneeId()));
+                taskBuilder.assignee(assignee);
+            }
+
+            Task task = taskBuilder.build();
+            Task savedTask = taskRepository.save(task);
+            return mapToResponse(savedTask);
+            
+        } catch (DataIntegrityViolationException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Data integrity violation: " + e.getMessage(), e);
+        } catch (TransactionSystemException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Transaction failed: " + e.getMostSpecificCause().getMessage(), e);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create task: " + e.getMessage(), e);
+        }
     }
 
     private TaskResponse mapToResponse(Task task){
@@ -142,64 +169,156 @@ public class TaskService {
 
     @Transactional
     public TaskResponse updateTask(Long id, TaskRequest taskRequest) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+        if (id == null) {
+            throw new IllegalArgumentException("Task ID cannot be null");
+        }
+        if (taskRequest == null) {
+            throw new IllegalArgumentException("Task request cannot be null");
+        }
+        
+        try {
+            Task task = taskRepository.findById(id)
+                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
 
-        task.setTitle(taskRequest.getTitle());
-        task.setDescription(taskRequest.getDescription());
-        task.setDueDate(taskRequest.getDueDate());
+            if (taskRequest.getTitle() != null) {
+                task.setTitle(validateTitle(taskRequest.getTitle()));
+            }
+            if (taskRequest.getDescription() != null) {
+                task.setDescription(taskRequest.getDescription());
+            }
+            if (taskRequest.getDueDate() != null) {
+                task.setDueDate(validateDueDate(taskRequest.getDueDate()));
+            }
+            if (taskRequest.getStatus() != null) {
+                task.setStatus(taskRequest.getStatus());
+            }
+            if (taskRequest.getPriority() != null) {
+                task.setPriority(taskRequest.getPriority());
+            }
+            if (taskRequest.getPosition() != null) {
+                task.setPosition(validatePosition(taskRequest.getPosition()));
+            }
 
-        Task updatedTask = taskRepository.save(task);
-        return mapToResponse(updatedTask);
+            Task updatedTask = taskRepository.save(task);
+            return mapToResponse(updatedTask);
+            
+        } catch (DataAccessException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update task: " + e.getMessage(), e);
+        }
     }
 
     @Transactional
     public void deleteTask(Long id) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
-        taskRepository.delete(task);
+        if (id == null) {
+            throw new IllegalArgumentException("Task ID cannot be null");
+        }
+        
+        try {
+            Task task = taskRepository.findById(id)
+                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+            taskRepository.delete(task);
+        } catch (DataAccessException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete task: " + e.getMessage(), e);
+        }
     }
 
     @Transactional
     public TaskResponse updateTaskStatus(Long id, Status status) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
-
-        task.setStatus(status);
-
-        if (status == Status.DONE) {
-            task.setCompletedAt(LocalDateTime.now());
+        if (id == null) {
+            throw new IllegalArgumentException("Task ID cannot be null");
         }
+        if (status == null) {
+            throw new IllegalArgumentException("Status cannot be null");
+        }
+        
+        try {
+            Task task = taskRepository.findById(id)
+                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
 
-        Task updatedTask = taskRepository.save(task);
-        return mapToResponse(updatedTask);
+            task.setStatus(status);
+
+            if (status == Status.DONE) {
+                task.setCompletedAt(LocalDateTime.now());
+            }
+
+            Task updatedTask = taskRepository.save(task);
+            return mapToResponse(updatedTask);
+            
+        } catch (DataAccessException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update task status: " + e.getMessage(), e);
+        }
     }
 
     @Transactional
     public TaskResponse assignTask(Long taskId, Long userId) {
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
-
-        if (userId != null) {
-            com.pablomarotta.smart_task_manager.model.User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new RuntimeException("User not found with id: " + userId));
-            task.setAssignee(user);
-        } else {
-            task.setAssignee(null);
+        if (taskId == null) {
+            throw new IllegalArgumentException("Task ID cannot be null");
         }
+        
+        try {
+            Task task = taskRepository.findById(taskId)
+                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
 
-        Task updatedTask = taskRepository.save(task);
-        return mapToResponse(updatedTask);
+            if (userId != null) {
+                com.pablomarotta.smart_task_manager.model.User user = userRepository.findById(userId)
+                        .orElseThrow(() -> new UserNotFoundException("User not found with id: " + userId));
+                task.setAssignee(user);
+            } else {
+                task.setAssignee(null);
+            }
+
+            Task updatedTask = taskRepository.save(task);
+            return mapToResponse(updatedTask);
+            
+        } catch (DataAccessException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to assign task: " + e.getMessage(), e);
+        }
     }
 
     @Transactional
     public TaskResponse updateTaskPriority(Long id, Priority priority) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+        if (id == null) {
+            throw new IllegalArgumentException("Task ID cannot be null");
+        }
+        if (priority == null) {
+            throw new IllegalArgumentException("Priority cannot be null");
+        }
+        
+        try {
+            Task task = taskRepository.findById(id)
+                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
 
-        task.setPriority(priority);
-
-        Task updatedTask = taskRepository.save(task);
-        return mapToResponse(updatedTask);
+            task.setPriority(priority);
+            Task updatedTask = taskRepository.save(task);
+            return mapToResponse(updatedTask);
+            
+        } catch (DataAccessException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update task priority: " + e.getMessage(), e);
+        }
+    }
+    
+    // Validation helper methods
+    private String validateTitle(String title) {
+        if (title == null || title.trim().isEmpty()) {
+            throw new IllegalArgumentException("Task title cannot be empty");
+        }
+        if (title.length() > 255) {
+            throw new IllegalArgumentException("Task title cannot exceed 255 characters");
+        }
+        return title.trim();
+    }
+    
+    private LocalDate validateDueDate(LocalDate dueDate) {
+        if (dueDate != null && dueDate.isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("Due date cannot be in the past");
+        }
+        return dueDate;
+    }
+    
+    private Integer validatePosition(Integer position) {
+        if (position != null && position < 0) {
+            throw new IllegalArgumentException("Position cannot be negative");
+        }
+        return position != null ? position : 0;
     }
 }

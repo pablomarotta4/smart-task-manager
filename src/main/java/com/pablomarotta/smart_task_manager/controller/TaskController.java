@@ -6,6 +6,7 @@ import com.pablomarotta.smart_task_manager.dto.UserResponse;
 import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.service.TaskService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -22,7 +23,7 @@ public class TaskController {
 
     @PostMapping("/newtask")
     @ResponseStatus(HttpStatus.CREATED)
-    public TaskResponse createTask(@RequestBody TaskRequest taskRequest) {
+    public TaskResponse createTask(@Valid @RequestBody TaskRequest taskRequest) {
         log.info("Creating new task: {}", taskRequest.getTitle());
         return taskService.createTask(taskRequest);
     }
@@ -88,7 +89,7 @@ public class TaskController {
     }
 
     @PutMapping("/{id}")
-    public TaskResponse updateTask(@PathVariable Long id, @RequestBody TaskRequest taskRequest) {
+    public TaskResponse updateTask(@PathVariable Long id, @Valid @RequestBody TaskRequest taskRequest) {
         log.info("Updating task with id: {}", id);
         return taskService.updateTask(id, taskRequest);
     }
