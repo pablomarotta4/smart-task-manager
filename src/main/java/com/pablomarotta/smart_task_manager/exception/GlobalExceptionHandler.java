@@ -55,4 +55,26 @@ public class GlobalExceptionHandler {
                 HttpStatus.NOT_FOUND.value()
         );
     }
+
+    @ExceptionHandler(TaskNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorDetails handleTaskNotFoundException(TaskNotFoundException ex, WebRequest request) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                ex.getMessage(),
+                request.getDescription(false),
+                HttpStatus.NOT_FOUND.value()
+        );
+    }
+
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public org.springframework.http.ResponseEntity<ErrorDetails> handleResponseStatusException(org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
+        ErrorDetails errorDetails = new ErrorDetails(
+                LocalDateTime.now(),
+                ex.getReason(),
+                request.getDescription(false),
+                ex.getStatusCode().value()
+        );
+        return new org.springframework.http.ResponseEntity<>(errorDetails, ex.getStatusCode());
+    }
 }

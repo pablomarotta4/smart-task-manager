@@ -71,6 +71,8 @@ public class TaskService {
             Task savedTask = taskRepository.save(task);
             return mapToResponse(savedTask);
             
+        } catch (ProjectNotFoundException | UserNotFoundException e) {
+            throw e;
         } catch (DataIntegrityViolationException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Data integrity violation: " + e.getMessage(), e);
         } catch (TransactionSystemException e) {

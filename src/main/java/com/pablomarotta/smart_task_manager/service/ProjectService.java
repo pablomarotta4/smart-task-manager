@@ -50,7 +50,8 @@ public class ProjectService {
         projectResponse.setName(project.getName());
         projectResponse.setOwnerId(project.getOwner().getId());
         projectResponse.setOwnerUsername(project.getOwner().getUsername());
-        projectResponse.setCreatedAt(project.getCreatedAt().toString());
+        projectResponse.setCreatedAt(project.getCreatedAt() != null ? 
+            project.getCreatedAt().toString() : null);
 
         return projectResponse;
     }
