@@ -7,6 +7,7 @@ import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.stream.Collectors;
 public class UserService {
 
     private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     @Transactional
     public UserResponse createUser(UserRequest userRequest) {
@@ -28,7 +30,7 @@ public class UserService {
                 .username(userRequest.getUsername())
                 .email(userRequest.getEmail())
                 .fullName(userRequest.getFullName())
-                .password(userRequest.getPassword())
+                .password(passwordEncoder.encode(userRequest.getPassword()))
                 .build();
 
         User savedUser = userRepository.save(user);
@@ -79,7 +81,7 @@ public class UserService {
         user.setEmail(userRequest.getEmail());
         user.setFullName(userRequest.getFullName());
         if (userRequest.getPassword() != null && !userRequest.getPassword().isEmpty()) {
-            user.setPassword(userRequest.getPassword());
+            user.setPassword(passwordEncoder.encode(userRequest.getPassword()));
         }
 
         User updatedUser = userRepository.save(user);
