@@ -12,6 +12,17 @@ import java.time.LocalDateTime;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(Exception.class)
+    @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
+    public ErrorDetails handleGlobalException(Exception ex, WebRequest request) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                ex.getMessage(),
+                request.getDescription(false),
+                HttpStatus.INTERNAL_SERVER_ERROR.value()
+        );
+    }
+
     @ExceptionHandler(UserDuplicatedException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorDetails handleUserDuplicatedException(UserDuplicatedException ex, WebRequest request) {
@@ -26,6 +37,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UserNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
     public ErrorDetails handleUserNotFoundException(UserNotFoundException ex, WebRequest request) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                ex.getMessage(),
+                request.getDescription(false),
+                HttpStatus.NOT_FOUND.value()
+        );
+    }
+
+    @ExceptionHandler(ProjectNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ErrorDetails handleProjectNotFoundException(ProjectNotFoundException ex, WebRequest request) {
         return new ErrorDetails(
                 LocalDateTime.now(),
                 ex.getMessage(),
