@@ -1,10 +1,18 @@
 -- Tabla de usuarios
 CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
+    username VARCHAR(50) NOT NULL UNIQUE,
     email VARCHAR(255) NOT NULL UNIQUE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100) NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_active ON users(active);
 
 -- Tabla de proyectos/tableros
 CREATE TABLE projects (
