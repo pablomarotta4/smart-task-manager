@@ -40,11 +40,11 @@ public class Task {
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    @NotBlank
-    @Size(max = 32)
-    @Column(nullable = false)
+    @NotNull
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
     @Builder.Default
-    private String status = "TODO";
+    private Status status = Status.TODO;
 
     @Column
     private Integer position;
@@ -60,9 +60,9 @@ public class Task {
     @Column(name = "due_date")
     private LocalDate dueDate;
 
-    @Size(max = 16)
-    @Column
-    private String priority;
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private Priority priority;
 
     @Size(max = 32)
     @Column
