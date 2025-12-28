@@ -3,7 +3,6 @@ package com.pablomarotta.smart_task_manager.integration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.dto.*;
 import com.pablomarotta.smart_task_manager.model.Status;
-import com.pablomarotta.smart_task_manager.model.User;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -44,19 +43,10 @@ public class TaskFlowIntegrationTest {
         UserResponse userResponse = objectMapper.readValue(userResult.getResponse().getContentAsString(), UserResponse.class);
         assertNotNull(userResponse.getId());
 
-        // Necesitamos el objeto User para el ProjectRequest según el DTO actual
-        User owner = User.builder()
-                .id(userResponse.getId())
-                .username(userResponse.getUsername())
-                .email(userResponse.getEmail())
-                .fullName(userResponse.getFullName())
-                .active(userResponse.getActive())
-                .build();
-
         // 2. Crear proyecto
         ProjectRequest projectRequest = new ProjectRequest();
         projectRequest.setName("Integration Test Project");
-        projectRequest.setOwner(owner);
+        projectRequest.setUsername(userResponse.getUsername());
 
         MvcResult projectResult = mockMvc.perform(post("/projects")
                 .contentType(MediaType.APPLICATION_JSON)

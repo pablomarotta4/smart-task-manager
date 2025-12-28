@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.dto.ProjectRequest;
 import com.pablomarotta.smart_task_manager.dto.ProjectResponse;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
-import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.service.ProjectService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,20 +35,15 @@ class ProjectControllerTest {
     private ObjectMapper objectMapper;
     private ProjectResponse projectResponse;
     private ProjectRequest projectRequest;
-    private User owner;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(projectController).build();
         objectMapper = new ObjectMapper();
-        
-        owner = new User();
-        owner.setId(1L);
-        owner.setUsername("testuser");
-        
+
         projectRequest = new ProjectRequest();
         projectRequest.setName("Test Project");
-        projectRequest.setOwner(owner);
+        projectRequest.setUsername("testuser");
         
         projectResponse = new ProjectResponse();
         projectResponse.setId(1L);
@@ -76,7 +70,7 @@ class ProjectControllerTest {
     void createProject_WithInvalidData_ShouldReturnBadRequest() throws Exception {
         ProjectRequest invalidRequest = new ProjectRequest();
         invalidRequest.setName(""); // Invalid: name is blank
-        invalidRequest.setOwner(null); // Invalid: owner is null
+        invalidRequest.setUsername(""); // Invalid: username is blank
 
         mockMvc.perform(post("/projects")
                 .contentType(MediaType.APPLICATION_JSON)

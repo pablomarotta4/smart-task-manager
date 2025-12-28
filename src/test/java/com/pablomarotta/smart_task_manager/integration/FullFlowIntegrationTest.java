@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.dto.*;
 import com.pablomarotta.smart_task_manager.model.Status;
-import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
@@ -89,17 +88,9 @@ public class FullFlowIntegrationTest {
                 .andExpect(status().isConflict());
 
         // === 2) Crear proyecto para ese usuario ===
-        User owner = User.builder()
-                .id(userId)
-                .username("flowuser")
-                .email("flowuser@example.com")
-                .fullName("Flow User")
-                .active(true)
-                .build();
-
         ProjectRequest projectRequest = new ProjectRequest();
         projectRequest.setName("Flow Project");
-        projectRequest.setOwner(owner);
+        projectRequest.setUsername("flowuser");
 
         MvcResult projectResult = mockMvc.perform(post("/projects")
                         .contentType(MediaType.APPLICATION_JSON)

@@ -1,8 +1,6 @@
 package com.pablomarotta.smart_task_manager.service;
 
-import com.pablomarotta.smart_task_manager.dto.TaskRequest;
-import com.pablomarotta.smart_task_manager.dto.TaskResponse;
-import com.pablomarotta.smart_task_manager.dto.UserResponse;
+import com.pablomarotta.smart_task_manager.dto.*;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.TaskNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
@@ -35,6 +33,7 @@ public class TaskService {
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
     private final ProjectRepository projectRepository;
+    private final AIService aiService;
 
     @Transactional
     public TaskResponse createTask(TaskRequest taskRequest) {
@@ -50,6 +49,13 @@ public class TaskService {
             var project = projectRepository.findById(taskRequest.getProjectId())
                     .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + taskRequest.getProjectId()));
 
+            AIClassificationRequest aiRequest = AIClassificationRequest.builder()
+                    .title(taskRequest.getTitle())
+                    .description(taskRequest.getDescription())
+                    .build();
+
+            AIClassificationResponse aiResponse = aiService.classifyTask(aiRequest);
+
             var taskBuilder = Task.builder()
                     .id(null)
                     .title(validateTitle(taskRequest.getTitle()))
@@ -59,7 +65,11 @@ public class TaskService {
                     .priority(taskRequest.getPriority())
                     .category(taskRequest.getCategory())
                     .dueDate(validateDueDate(taskRequest.getDueDate()))
-                    .position(validatePosition(taskRequest.getPosition()));
+                    .position(validatePosition(taskRequest.getPosition()))
+                    .aiPriority(aiResponse.getPriority())
+                    .aiCategory(aiResponse.getCategory())
+                    .aiSuggestedDueDays(aiResponse.getEstimatedDays())
+                    .aiSummary(aiResponse.getSummary());
 
             if (taskRequest.getAssigneeId() != null) {
                 var assignee = userRepository.findById(taskRequest.getAssigneeId())
