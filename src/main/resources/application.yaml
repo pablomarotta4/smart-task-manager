@@ -38,3 +38,13 @@ logging:
 
 server:
   port: 8080
+
+ai:
+  ollama:
+    enabled: ${AI_ENABLED:true}
+    base-url: http://127.0.0.1:11434  # ← Cambiar localhost por 127.0.0.1
+    model: ${OLLAMA_MODEL:llama3.2:3b}
+    timeout: 30000
+    max-tokens: 1000
+    temperature: 0.7
+

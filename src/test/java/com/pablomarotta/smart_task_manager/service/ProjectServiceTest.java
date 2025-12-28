@@ -3,9 +3,11 @@ package com.pablomarotta.smart_task_manager.service;
 import com.pablomarotta.smart_task_manager.dto.ProjectRequest;
 import com.pablomarotta.smart_task_manager.dto.ProjectResponse;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
+import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
+import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,6 +29,9 @@ class ProjectServiceTest {
 
     @Mock
     private ProjectRepository projectRepository;
+
+    @Mock
+    private UserRepository userRepository;
 
     @InjectMocks
     private ProjectService projectService;
@@ -50,12 +55,13 @@ class ProjectServiceTest {
 
         projectRequest = new ProjectRequest();
         projectRequest.setName("Test Project");
-        projectRequest.setOwner(owner);
+        projectRequest.setUsername("testuser");
     }
 
     @Test
     void createProject_ShouldReturnCreatedProject() {
         // Arrange
+        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(owner));
         when(projectRepository.save(any(Project.class))).thenReturn(project);
 
         // Act
@@ -67,12 +73,27 @@ class ProjectServiceTest {
         assertEquals(project.getName(), response.getName());
         assertEquals(owner.getId(), response.getOwnerId());
         assertEquals(owner.getUsername(), response.getOwnerUsername());
+        verify(userRepository, times(1)).findByUsername("testuser");
         verify(projectRepository, times(1)).save(any(Project.class));
+    }
+
+    @Test
+    void createProject_WhenUserNotFound_ShouldThrowUserNotFoundException() {
+        // Arrange
+        when(userRepository.findByUsername("testuser")).thenReturn(Optional.empty());
+
+        // Act & Assert
+        assertThrows(UserNotFoundException.class, () -> {
+            projectService.createProject(projectRequest);
+        });
+        verify(userRepository, times(1)).findByUsername("testuser");
+        verify(projectRepository, never()).save(any(Project.class));
     }
 
     @Test
     void createProject_WhenExceptionThrown_ShouldThrowResponseStatusException() {
         // Arrange
+        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(owner));
         when(projectRepository.save(any(Project.class))).thenThrow(new RuntimeException("Database error"));
 
         // Act & Assert
