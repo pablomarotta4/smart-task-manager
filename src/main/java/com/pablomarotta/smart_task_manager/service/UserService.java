@@ -26,6 +26,10 @@ public class UserService {
             throw new UserDuplicatedException("User already exists with provided username or email");
         }
 
+        if (userRequest.getPassword() == null || userRequest.getPassword().trim().isEmpty()) {
+            throw new IllegalArgumentException("Password is required");
+        }
+
         User user = User.builder()
                 .username(userRequest.getUsername())
                 .email(userRequest.getEmail())
