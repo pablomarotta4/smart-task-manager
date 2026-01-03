@@ -3,6 +3,7 @@ package com.pablomarotta.smart_task_manager.controller;
 import com.pablomarotta.smart_task_manager.dto.UserRequest;
 import com.pablomarotta.smart_task_manager.dto.UserResponse;
 import com.pablomarotta.smart_task_manager.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -19,7 +20,7 @@ public class UserController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse createUser(@RequestBody UserRequest userRequest) {
+    public UserResponse createUser(@Valid @RequestBody UserRequest userRequest) {
         log.info("Creating user with username: {}", userRequest.getUsername());
         return userService.createUser(userRequest);
     }
@@ -43,7 +44,7 @@ public class UserController {
 
     @PutMapping("/{username}")
     @ResponseStatus(HttpStatus.OK)
-    public UserResponse updateUser(@PathVariable String username, @RequestBody UserRequest userRequest) {
+    public UserResponse updateUser(@PathVariable String username, @Valid @RequestBody UserRequest userRequest) {
         log.info("Updating user with username: {}", username);
         return userService.updateUser(username, userRequest);
     }

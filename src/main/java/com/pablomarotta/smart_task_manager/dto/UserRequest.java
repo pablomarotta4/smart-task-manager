@@ -5,15 +5,15 @@ import lombok.Data;
 
 @Data
 public class UserRequest {
-    @NotBlank
+    @NotBlank(message = "Username is required")
     private String username;
 
-    @NotBlank
+    @NotBlank(message = "Email is required")
+    @jakarta.validation.constraints.Email(message = "Email must be valid")
     private String email;
 
-    @NotBlank
     private String password;
 
-    @NotBlank
+    @NotBlank(message = "Full name is required")
     private String fullName;
 }
