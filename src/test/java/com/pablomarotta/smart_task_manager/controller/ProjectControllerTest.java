@@ -3,6 +3,7 @@ package com.pablomarotta.smart_task_manager.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.dto.ProjectRequest;
 import com.pablomarotta.smart_task_manager.dto.ProjectResponse;
+import com.pablomarotta.smart_task_manager.exception.GlobalExceptionHandler;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.service.ProjectService;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,7 +39,9 @@ class ProjectControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(projectController).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(projectController)
+                .setControllerAdvice(new GlobalExceptionHandler())
+                .build();
         objectMapper = new ObjectMapper();
 
         projectRequest = new ProjectRequest();
@@ -56,7 +59,7 @@ class ProjectControllerTest {
     void createProject_ShouldReturnCreatedProject() throws Exception {
         when(projectService.createProject(any(ProjectRequest.class))).thenReturn(projectResponse);
 
-        mockMvc.perform(post("/projects")
+        mockMvc.perform(post("/api/projects")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(projectRequest)))
                 .andExpect(status().isCreated())
@@ -72,7 +75,7 @@ class ProjectControllerTest {
         invalidRequest.setName(""); // Invalid: name is blank
         invalidRequest.setUsername(""); // Invalid: username is blank
 
-        mockMvc.perform(post("/projects")
+        mockMvc.perform(post("/api/projects")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(invalidRequest)))
                 .andExpect(status().isBadRequest());
@@ -88,7 +91,7 @@ class ProjectControllerTest {
 
         when(projectService.getAllProjects()).thenReturn(Arrays.asList(projectResponse, project2));
 
-        mockMvc.perform(get("/projects")
+        mockMvc.perform(get("/api/projects")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
@@ -100,7 +103,7 @@ class ProjectControllerTest {
     void getProjectById_WithValidId_ShouldReturnProject() throws Exception {
         when(projectService.getProjectById(1L)).thenReturn(projectResponse);
 
-        mockMvc.perform(get("/projects/1")
+        mockMvc.perform(get("/api/projects/1")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1))
@@ -111,7 +114,7 @@ class ProjectControllerTest {
     void getProjectById_WithNonExistentId_ShouldReturnNotFound() throws Exception {
         when(projectService.getProjectById(99L)).thenThrow(new ProjectNotFoundException("Project not found with id: 99"));
 
-        mockMvc.perform(get("/projects/99")
+        mockMvc.perform(get("/api/projects/99")
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Project not found with id: 99"));

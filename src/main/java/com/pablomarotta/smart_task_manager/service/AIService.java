@@ -17,6 +17,14 @@ public class AIService {
     }
 
     public AIClassificationResponse classifyTask(AIClassificationRequest request) {
-        return ollamaService.classifyTask(request);
+        if (!aiConfigProperties.isEnabled()) {
+            return new AIClassificationResponse();
+        }
+
+        try {
+            return ollamaService.classifyTask(request);
+        } catch (RuntimeException ex) {
+            return new AIClassificationResponse();
+        }
     }
 }
