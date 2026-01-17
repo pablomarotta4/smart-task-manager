@@ -44,6 +44,11 @@ public class User {
     @Column(name = "full_name", nullable = false)
     private String fullName;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    @Builder.Default
+    private Role role = Role.USER;
+
     @Column(nullable = false)
     @Builder.Default
     private Boolean active = true;

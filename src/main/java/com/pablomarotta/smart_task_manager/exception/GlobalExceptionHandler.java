@@ -2,6 +2,9 @@ package com.pablomarotta.smart_task_manager.exception;
 
 import com.pablomarotta.smart_task_manager.dto.ErrorDetails;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -52,6 +55,39 @@ public class GlobalExceptionHandler {
                 ex.getMessage(),
                 request.getDescription(false),
                 HttpStatus.INTERNAL_SERVER_ERROR.value()
+        );
+    }
+
+    @ExceptionHandler(AuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorDetails handleAuthenticationException(AuthenticationException ex, WebRequest request) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                ex.getMessage(),
+                request.getDescription(false),
+                HttpStatus.UNAUTHORIZED.value()
+        );
+    }
+
+    @ExceptionHandler(BadCredentialsException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ErrorDetails handleBadCredentialsException(BadCredentialsException ex, WebRequest request) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                ex.getMessage(),
+                request.getDescription(false),
+                HttpStatus.UNAUTHORIZED.value()
+        );
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ErrorDetails handleAccessDeniedException(AccessDeniedException ex, WebRequest request) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                ex.getMessage(),
+                request.getDescription(false),
+                HttpStatus.FORBIDDEN.value()
         );
     }
 

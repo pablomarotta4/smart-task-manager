@@ -51,25 +51,32 @@ public class FullFlowIntegrationTest {
 
     @Test
     public void testCompleteFlowWithDeduplication() throws Exception {
-        // === 1) Crear usuario ===
+        // === 1) Registrar usuario y obtener token ===
+        RegisterRequest registerRequest = new RegisterRequest();
+        registerRequest.setUsername("flowuser");
+        registerRequest.setEmail("flowuser@example.com");
+        registerRequest.setPassword("password123");
+        registerRequest.setFullName("Flow User");
+
+        MvcResult authResult = mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        AuthResponse authResponse = objectMapper.readValue(authResult.getResponse().getContentAsString(), AuthResponse.class);
+        assertNotNull(authResponse.getUser().getId());
+        Long userId = authResponse.getUser().getId();
+        String token = authResponse.getToken();
+
+        // === PRUEBA DE DEDUPLICACIÓN ===
+        // Intentar crear el mismo usuario otra vez
         UserRequest userRequest = new UserRequest();
         userRequest.setUsername("flowuser");
         userRequest.setEmail("flowuser@example.com");
         userRequest.setPassword("password123");
         userRequest.setFullName("Flow User");
 
-        MvcResult userResult = mockMvc.perform(post("/api/users")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(userRequest)))
-                .andExpect(status().isCreated())
-                .andReturn();
-
-        UserResponse userResponse = objectMapper.readValue(userResult.getResponse().getContentAsString(), UserResponse.class);
-        assertNotNull(userResponse.getId());
-        Long userId = userResponse.getId();
-
-        // === PRUEBA DE DEDUPLICACIÓN ===
-        // Intentar crear el mismo usuario otra vez
         mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(userRequest)))
@@ -92,8 +99,9 @@ public class FullFlowIntegrationTest {
         projectRequest.setName("Flow Project");
         projectRequest.setUsername("flowuser");
 
-        MvcResult projectResult = mockMvc.perform(post("/projects")
+        MvcResult projectResult = mockMvc.perform(post("/api/projects")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(projectRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -112,8 +120,9 @@ public class FullFlowIntegrationTest {
         task1Request.setProjectId(projectId);
         task1Request.setAssigneeId(userId);
 
-        MvcResult task1Result = mockMvc.perform(post("/tasks/newtask")
+        MvcResult task1Result = mockMvc.perform(post("/api/tasks/newtask")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(task1Request)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -128,8 +137,9 @@ public class FullFlowIntegrationTest {
         task2Request.setProjectId(projectId);
         task2Request.setAssigneeId(userId);
 
-        MvcResult task2Result = mockMvc.perform(post("/tasks/newtask")
+        MvcResult task2Result = mockMvc.perform(post("/api/tasks/newtask")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(task2Request)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -144,8 +154,9 @@ public class FullFlowIntegrationTest {
         task3Request.setProjectId(projectId);
         task3Request.setAssigneeId(userId);
 
-        MvcResult task3Result = mockMvc.perform(post("/tasks/newtask")
+        MvcResult task3Result = mockMvc.perform(post("/api/tasks/newtask")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(task3Request)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -154,18 +165,21 @@ public class FullFlowIntegrationTest {
 
         // === 4) Transicionar estados de algunas tasks ===
         // Task1: TODO -> IN_PROGRESS -> DONE
-        mockMvc.perform(patch("/tasks/" + task1Id + "/status")
+        mockMvc.perform(patch("/api/tasks/" + task1Id + "/status")
+                        .header("Authorization", "Bearer " + token)
                         .param("status", "IN_PROGRESS"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
 
-        mockMvc.perform(patch("/tasks/" + task1Id + "/status")
+        mockMvc.perform(patch("/api/tasks/" + task1Id + "/status")
+                        .header("Authorization", "Bearer " + token)
                         .param("status", "DONE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("DONE"));
 
         // Task2: TODO -> IN_PROGRESS
-        mockMvc.perform(patch("/tasks/" + task2Id + "/status")
+        mockMvc.perform(patch("/api/tasks/" + task2Id + "/status")
+                        .header("Authorization", "Bearer " + token)
                         .param("status", "IN_PROGRESS"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
@@ -173,7 +187,8 @@ public class FullFlowIntegrationTest {
         // Task3 queda en TODO (sin cambios de estado)
 
         // === 5) Listar tasks del proyecto para verificar ===
-        MvcResult listResult = mockMvc.perform(get("/tasks/project/" + projectId))
+        MvcResult listResult = mockMvc.perform(get("/api/tasks/project/" + projectId)
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -191,8 +206,9 @@ public class FullFlowIntegrationTest {
         invalidTaskRequest.setTitle("Invalid Task");
         invalidTaskRequest.setProjectId(999L);
         invalidTaskRequest.setStatus(Status.TODO);
-        mockMvc.perform(post("/tasks/newtask")
+        mockMvc.perform(post("/api/tasks/newtask")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(invalidTaskRequest)))
                 .andExpect(status().isNotFound());
 
@@ -202,8 +218,9 @@ public class FullFlowIntegrationTest {
         invalidUserTaskRequest.setProjectId(projectId);
         invalidUserTaskRequest.setAssigneeId(999L);
         invalidUserTaskRequest.setStatus(Status.TODO);
-        mockMvc.perform(post("/tasks/newtask")
+        mockMvc.perform(post("/api/tasks/newtask")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(invalidUserTaskRequest)))
                 .andExpect(status().isNotFound());
     }

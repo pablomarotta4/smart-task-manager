@@ -10,7 +10,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/projects")
+@RequestMapping("/api/projects")
 @RequiredArgsConstructor
 @Slf4j
 public class ProjectController {

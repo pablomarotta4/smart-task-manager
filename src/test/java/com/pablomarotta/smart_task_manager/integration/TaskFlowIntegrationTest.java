@@ -27,29 +27,31 @@ public class TaskFlowIntegrationTest {
 
     @Test
     public void testFullTaskLifecycle() throws Exception {
-        // 1. Crear usuario
-        UserRequest userRequest = new UserRequest();
-        userRequest.setUsername("testuser");
-        userRequest.setEmail("testuser@example.com");
-        userRequest.setPassword("password123");
-        userRequest.setFullName("Test User");
+        // 1. Registrar usuario y obtener token
+        RegisterRequest registerRequest = new RegisterRequest();
+        registerRequest.setUsername("testuser");
+        registerRequest.setEmail("testuser@example.com");
+        registerRequest.setPassword("password123");
+        registerRequest.setFullName("Test User");
 
-        MvcResult userResult = mockMvc.perform(post("/api/users")
+        MvcResult authResult = mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(userRequest)))
+                .content(objectMapper.writeValueAsString(registerRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
 
-        UserResponse userResponse = objectMapper.readValue(userResult.getResponse().getContentAsString(), UserResponse.class);
-        assertNotNull(userResponse.getId());
+        AuthResponse authResponse = objectMapper.readValue(authResult.getResponse().getContentAsString(), AuthResponse.class);
+        assertNotNull(authResponse.getUser().getId());
+        String token = authResponse.getToken();
 
         // 2. Crear proyecto
         ProjectRequest projectRequest = new ProjectRequest();
         projectRequest.setName("Integration Test Project");
-        projectRequest.setUsername(userResponse.getUsername());
+        projectRequest.setUsername(authResponse.getUser().getUsername());
 
-        MvcResult projectResult = mockMvc.perform(post("/projects")
+        MvcResult projectResult = mockMvc.perform(post("/api/projects")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer " + token)
                 .content(objectMapper.writeValueAsString(projectRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -63,10 +65,11 @@ public class TaskFlowIntegrationTest {
         taskRequest.setDescription("Task description");
         taskRequest.setStatus(Status.TODO);
         taskRequest.setProjectId(projectResponse.getId());
-        taskRequest.setAssigneeId(userResponse.getId());
+        taskRequest.setAssigneeId(authResponse.getUser().getId());
 
-        MvcResult taskResult = mockMvc.perform(post("/tasks/newtask")
+        MvcResult taskResult = mockMvc.perform(post("/api/tasks/newtask")
                 .contentType(MediaType.APPLICATION_JSON)
+                .header("Authorization", "Bearer " + token)
                 .content(objectMapper.writeValueAsString(taskRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -76,7 +79,8 @@ public class TaskFlowIntegrationTest {
         assertEquals(Status.TODO, taskResponse.getStatus());
 
         // 4. Cambiar de estado (TODO -> IN_PROGRESS)
-        MvcResult updateStatusResult = mockMvc.perform(patch("/tasks/" + taskResponse.getId() + "/status")
+        MvcResult updateStatusResult = mockMvc.perform(patch("/api/tasks/" + taskResponse.getId() + "/status")
+                .header("Authorization", "Bearer " + token)
                 .param("status", Status.IN_PROGRESS.name()))
                 .andExpect(status().isOk())
                 .andReturn();
@@ -85,7 +89,8 @@ public class TaskFlowIntegrationTest {
         assertEquals(Status.IN_PROGRESS, updatedTaskResponse.getStatus());
 
         // 5. Cerrar task (IN_PROGRESS -> DONE)
-        MvcResult closeTaskResult = mockMvc.perform(patch("/tasks/" + taskResponse.getId() + "/status")
+        MvcResult closeTaskResult = mockMvc.perform(patch("/api/tasks/" + taskResponse.getId() + "/status")
+                .header("Authorization", "Bearer " + token)
                 .param("status", Status.DONE.name()))
                 .andExpect(status().isOk())
                 .andReturn();

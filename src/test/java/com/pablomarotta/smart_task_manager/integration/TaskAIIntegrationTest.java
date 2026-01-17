@@ -33,32 +33,34 @@ public class TaskAIIntegrationTest {
 
     @Test
     public void testCreateTaskWithAIClassification() throws Exception {
-        // 1. Crear usuario
-        UserRequest userRequest = new UserRequest();
-        userRequest.setUsername("aitest_user");
-        userRequest.setEmail("aitest@example.com");
-        userRequest.setPassword("password123");
-        userRequest.setFullName("AI Test User");
+        // 1. Registrar usuario y obtener token
+        RegisterRequest registerRequest = new RegisterRequest();
+        registerRequest.setUsername("aitest_user");
+        registerRequest.setEmail("aitest@example.com");
+        registerRequest.setPassword("password123");
+        registerRequest.setFullName("AI Test User");
 
-        MvcResult userResult = mockMvc.perform(post("/api/users")
+        MvcResult authResult = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(userRequest)))
+                        .content(objectMapper.writeValueAsString(registerRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
 
-        UserResponse userResponse = objectMapper.readValue(
-                userResult.getResponse().getContentAsString(),
-                UserResponse.class
+        AuthResponse authResponse = objectMapper.readValue(
+                authResult.getResponse().getContentAsString(),
+                AuthResponse.class
         );
-        assertNotNull(userResponse.getId());
+        assertNotNull(authResponse.getUser().getId());
+        String token = authResponse.getToken();
 
         // 2. Crear proyecto
         ProjectRequest projectRequest = new ProjectRequest();
         projectRequest.setName("AI Test Project");
-        projectRequest.setUsername(userResponse.getUsername());
+        projectRequest.setUsername(authResponse.getUser().getUsername());
 
         MvcResult projectResult = mockMvc.perform(post("/api/projects")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(projectRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -78,8 +80,9 @@ public class TaskAIIntegrationTest {
         taskRequest.setStatus(Status.TODO);
         taskRequest.setProjectId(projectResponse.getId());
 
-        MvcResult taskResult = mockMvc.perform(post("/tasks/newtask")
+        MvcResult taskResult = mockMvc.perform(post("/api/tasks/newtask")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(taskRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -106,7 +109,8 @@ public class TaskAIIntegrationTest {
         System.out.println("- aiSummary (expected: concise summary)");
 
         // 6. Obtener la tarea completa para verificar campos AI
-        MvcResult getTaskResult = mockMvc.perform(get("/tasks/" + taskResponse.getId()))
+        MvcResult getTaskResult = mockMvc.perform(get("/api/tasks/" + taskResponse.getId())
+                        .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -134,31 +138,33 @@ public class TaskAIIntegrationTest {
 
     @Test
     public void testCreateTaskWithAI_FeatureRequest() throws Exception {
-        // 1. Crear usuario
-        UserRequest userRequest = new UserRequest();
-        userRequest.setUsername("feature_test_user");
-        userRequest.setEmail("featuretest@example.com");
-        userRequest.setPassword("password123");
-        userRequest.setFullName("Feature Test User");
+        // 1. Registrar usuario y obtener token
+        RegisterRequest registerRequest = new RegisterRequest();
+        registerRequest.setUsername("feature_test_user");
+        registerRequest.setEmail("featuretest@example.com");
+        registerRequest.setPassword("password123");
+        registerRequest.setFullName("Feature Test User");
 
-        MvcResult userResult = mockMvc.perform(post("/api/users")
+        MvcResult authResult = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(userRequest)))
+                        .content(objectMapper.writeValueAsString(registerRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
 
-        UserResponse userResponse = objectMapper.readValue(
-                userResult.getResponse().getContentAsString(),
-                UserResponse.class
+        AuthResponse authResponse = objectMapper.readValue(
+                authResult.getResponse().getContentAsString(),
+                AuthResponse.class
         );
+        String token = authResponse.getToken();
 
         // 2. Crear proyecto
         ProjectRequest projectRequest = new ProjectRequest();
         projectRequest.setName("Feature Test Project");
-        projectRequest.setUsername(userResponse.getUsername());
+        projectRequest.setUsername(authResponse.getUser().getUsername());
 
         MvcResult projectResult = mockMvc.perform(post("/api/projects")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(projectRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();
@@ -176,8 +182,9 @@ public class TaskAIIntegrationTest {
         taskRequest.setStatus(Status.TODO);
         taskRequest.setProjectId(projectResponse.getId());
 
-        MvcResult taskResult = mockMvc.perform(post("/tasks/newtask")
+        MvcResult taskResult = mockMvc.perform(post("/api/tasks/newtask")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Authorization", "Bearer " + token)
                         .content(objectMapper.writeValueAsString(taskRequest)))
                 .andExpect(status().isCreated())
                 .andReturn();

@@ -48,6 +48,7 @@ public class UserService {
         response.setUsername(user.getUsername());
         response.setEmail(user.getEmail());
         response.setFullName(user.getFullName());
+        response.setRole(user.getRole() != null ? user.getRole().name() : null);
         response.setActive(user.getActive());
         response.setCreatedAt(user.getCreatedAt() != null ? user.getCreatedAt().toString() : null);
         response.setUpdatedAt(user.getUpdatedAt() != null ? user.getUpdatedAt().toString() : null);
