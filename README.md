@@ -1,6 +1,6 @@
 # Smart Task Manager
 
-Smart Task Manager is a Java 21/Spring Boot API backed by PostgreSQL. Its AI project-planning
+Smart Task Manager is a React and Java 21/Spring Boot application backed by PostgreSQL. Its AI project-planning
 flow turns a short brief into an editable project draft and first backlog, evaluates whether that
 backlog is sufficient and non-repetitive, and creates the project and tickets only after explicit
 human confirmation.
@@ -8,7 +8,7 @@ human confirmation.
 ## Architecture
 
 ```text
-client
+React project workshop (login, prompt, draft editing, confirmation)
   -> Spring Boot API (auth, workflow, confirmation, database writes)
        -> FastAPI AI service (LangGraph, prompts, quality review)
             -> Ollama (replaceable model provider)
@@ -32,7 +32,7 @@ returns it with `quality.passed=false`; valid JSON alone is not treated as a goo
 
 ## Run locally
 
-Requirements: Java 21, Maven, Docker, Python 3.12+, and `uv`.
+Requirements: Java 21, Maven, Docker, Node.js, Python 3.12+, and `uv`.
 
 Start PostgreSQL:
 
@@ -47,11 +47,23 @@ docker compose --profile ai up -d ollama ai-service
 docker compose --profile ai exec ollama ollama pull llama3.2:3b
 ```
 
-Or run an existing host Ollama plus FastAPI directly:
+On Apple Silicon, prefer native Ollama so inference uses Metal acceleration. Docker Ollama runs on
+the CPU and may exceed the structured-generation timeout. Start native Ollama and load the model:
+
+```bash
+ollama serve
+
+# In another terminal, once per model
+ollama pull gemma3:4b
+```
+
+Then run FastAPI against it:
 
 ```bash
 cd ai-service
 uv sync
+SMART_TASK_AI_OLLAMA_MODEL=gemma3:4b \
+SMART_TASK_AI_OLLAMA_TIMEOUT_SECONDS=120 \
 uv run uvicorn smart_task_ai.main:app --port 8000
 ```
 
@@ -60,6 +72,18 @@ Then run Spring with Java 21:
 ```bash
 mvn spring-boot:run
 ```
+
+Finally, start the project workshop from the repository root:
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. Sign in with an existing local account, describe a project, review the
+quality evidence, edit the proposed project and tickets, and confirm when the draft is ready. The UI
+does not persist anything until confirmation. Set `VITE_API_BASE_URL` to override the default Spring
+URL, `http://127.0.0.1:8080`.
 
 Useful configuration:
 
@@ -112,6 +136,10 @@ links atomically. Calling the same confirmation again returns HTTP 200 and `alre
 ## Test and evaluate behavior
 
 ```bash
+# React API and interaction tests plus production build
+npm test
+npm run build
+
 # Python graph, provider, API, and deterministic behavior tests
 cd ai-service
 uv run pytest
