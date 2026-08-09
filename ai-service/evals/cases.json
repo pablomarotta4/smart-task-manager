@@ -1,14 +1,66 @@
 [
   {
     "id": "personal-meal-planner",
-    "prompt": "Build a personal meal planning app that creates a weekly plan and shopping list"
+    "prompt": "Build a personal meal planning app that creates a weekly plan and shopping list",
+    "required_concepts": [
+      {
+        "name": "weekly meal plan",
+        "any_of": ["weekly plan", "meals for the week", "week's meal"]
+      },
+      {
+        "name": "shopping list",
+        "any_of": ["shopping list", "grocery list"]
+      }
+    ]
   },
   {
     "id": "repair-shop-workflow",
-    "prompt": "Organize a small electronics repair shop from intake through customer pickup"
+    "prompt": "Organize a small electronics repair shop from intake through customer pickup",
+    "required_concepts": [
+      {
+        "name": "device intake",
+        "any_of": ["customer intake", "repair intake", "device intake"]
+      },
+      {
+        "name": "customer pickup",
+        "any_of": ["customer pickup", "device pickup", "ready for pickup"]
+      }
+    ]
   },
   {
     "id": "service-status-api",
-    "prompt": "Build a service status API that receives health signals and exposes current incidents"
+    "prompt": "Build a service status API that receives health signals and exposes current incidents",
+    "required_concepts": [
+      {
+        "name": "health signal ingestion",
+        "any_of": ["health signal", "health check", "heartbeat"]
+      },
+      {
+        "name": "current incidents",
+        "any_of": ["current incident", "active incident", "incident status"]
+      }
+    ]
+  },
+  {
+    "id": "neighborhood-tool-library",
+    "prompt": "Build a neighborhood tool lending library where residents can list, reserve, borrow, and return shared tools",
+    "required_concepts": [
+      {
+        "name": "tool listing workflow",
+        "any_of": ["list a tool", "tool listing"]
+      },
+      {
+        "name": "tool reservation workflow",
+        "any_of": ["reserve a tool", "tool reservation"]
+      },
+      {
+        "name": "tool borrowing workflow",
+        "any_of": ["borrow a tool", "borrow tools", "tool checkout", "check out a tool", "checked out"]
+      },
+      {
+        "name": "tool return workflow",
+        "any_of": ["return a borrowed tool", "return borrowed tools", "mark a borrowed tool as returned", "check in a borrowed tool", "status available"]
+      }
+    ]
   }
 ]

@@ -41,7 +41,7 @@ class TicketDraft(ContractModel):
     title: Annotated[str, StringConstraints(min_length=5, max_length=120)]
     description: Description
     priority: Priority
-    estimated_hours: Annotated[float, Field(gt=0, le=80)]
+    estimated_hours: Annotated[float, Field(ge=0.1, le=80)]
     acceptance_criteria: Annotated[list[Criterion], Field(min_length=1, max_length=8)]
     depends_on: Annotated[list[ClientId], Field(max_length=6)] = Field(default_factory=list)
     category: Annotated[str | None, StringConstraints(min_length=2, max_length=32)] = None
@@ -95,6 +95,10 @@ class ProjectDraft(ContractModel):
         for ticket_id in ticket_ids:
             visit(ticket_id)
         return self
+
+
+class BriefAnalysis(ContractModel):
+    explicit_capabilities: Annotated[list[ShortText], Field(min_length=1, max_length=12)]
 
 
 class PlanningRequest(ContractModel):

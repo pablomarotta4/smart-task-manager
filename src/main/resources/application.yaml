@@ -44,6 +44,10 @@ jwt:
   expiration: 86400000
 
 ai:
+  planning:
+    base-url: ${AI_PLANNING_BASE_URL:http://127.0.0.1:8000}
+    connect-timeout-ms: ${AI_PLANNING_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${AI_PLANNING_READ_TIMEOUT_MS:180000}
   ollama:
     enabled: ${AI_ENABLED:true}
     base-url: http://127.0.0.1:11434  # ← Cambiar localhost por 127.0.0.1

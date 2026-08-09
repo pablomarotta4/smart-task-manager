@@ -7,12 +7,15 @@ confirmation and persistence.
 ## Graph
 
 ```text
-generate -> assess -> (passed) finalize
-                     (failed) revise -> assess -> finalize
+analyze brief -> generate -> assess -> (passed) finalize
+                              (failed) revise -> assess -> finalize
 ```
 
-Revision is capped at one model call. A still-weak plan is returned with `quality.passed=false`,
-so a caller can show the problem instead of mistaking valid JSON for a useful plan.
+Analysis extracts the brief's explicit capability checklist. Assessment checks structure,
+repetition, actionability, and whether each checklist action appears in ticket content. Revision is
+capped at one model call. A still-weak plan is returned with `quality.passed=false`, so a caller can
+show the problem instead of mistaking valid JSON for a useful plan. An incomplete structured provider
+response receives one contract-repair retry; it does not consume the quality-revision budget.
 
 ## Local commands
 
@@ -40,6 +43,7 @@ The deterministic test suite measures whether responses are enough and whether t
 - maximum pairwise title similarity;
 - actionable-description coverage;
 - acceptance-criteria coverage;
+- extracted-capability and prompt-specific required-concept coverage;
 - issue codes and whether one revision was required.
 
 Run the same evaluation cases against the configured live Ollama model:

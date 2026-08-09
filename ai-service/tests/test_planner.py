@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from uuid import uuid4
 
-from smart_task_ai.contracts import Priority, ProjectDraft, TicketDraft
+from smart_task_ai.contracts import BriefAnalysis, Priority, ProjectDraft, TicketDraft
 from smart_task_ai.planner import ProjectPlanner
 
 
@@ -74,6 +74,17 @@ class ScriptedModel:
         return self.responses[index]
 
 
+@dataclass
+class ScriptedBriefAnalyzer:
+    responses: Sequence[BriefAnalysis]
+    calls: list[tuple[str, str]] = field(default_factory=lambda: list[tuple[str, str]]())
+
+    async def analyze(self, *, system_prompt: str, user_prompt: str) -> BriefAnalysis:
+        self.calls.append((system_prompt, user_prompt))
+        index = min(len(self.calls) - 1, len(self.responses) - 1)
+        return self.responses[index]
+
+
 async def test_adequate_first_output_finishes_without_revision() -> None:
     model = ScriptedModel([good_plan()])
     planner = ProjectPlanner(model)
@@ -84,6 +95,7 @@ async def test_adequate_first_output_finishes_without_revision() -> None:
     assert result.revision_count == 0
     assert result.draft == good_plan()
     assert len(model.calls) == 1
+    assert "Every explicitly requested capability" in model.calls[0][0]
 
 
 async def test_repetitive_output_is_revised_once_with_quality_feedback() -> None:
@@ -109,6 +121,56 @@ async def test_persistently_weak_output_stops_after_one_revision() -> None:
     assert result.quality.passed is False
     assert result.revision_count == 1
     assert len(model.calls) == 2
+
+
+async def test_brief_analysis_feeds_mandatory_capabilities_to_generation() -> None:
+    model = ScriptedModel([good_plan()])
+    analyzer = ScriptedBriefAnalyzer(
+        [
+            BriefAnalysis(
+                explicit_capabilities=[
+                    "assign members to garden plots",
+                    "track communal garden supplies",
+                ]
+            )
+        ]
+    )
+    planner = ProjectPlanner(model, brief_analyzer=analyzer)
+
+    result = await planner.plan(
+        run_id=uuid4(),
+        prompt="Plan garden plots, shared work, and shared garden supplies",
+    )
+
+    assert result.quality.passed is True
+    assert result.revision_count == 0
+    assert len(model.calls) == 1
+    assert len(analyzer.calls) == 1
+    assert "Mandatory explicit capability checklist" in model.calls[0][1]
+    assert "assign members to garden plots" in model.calls[0][1]
+    assert "track communal garden supplies" in model.calls[0][1]
+
+
+async def test_missing_extracted_capability_triggers_one_targeted_revision() -> None:
+    incomplete = good_plan()
+    corrected = good_plan("revised-")
+    corrected.tickets[0].title = "Publish the harvest schedule"
+    model = ScriptedModel([incomplete, corrected])
+    analyzer = ScriptedBriefAnalyzer(
+        [BriefAnalysis(explicit_capabilities=["publish harvest schedule"])]
+    )
+    planner = ProjectPlanner(model, brief_analyzer=analyzer)
+
+    result = await planner.plan(
+        run_id=uuid4(),
+        prompt="Coordinate the garden and publish a harvest schedule",
+    )
+
+    assert result.quality.passed is True
+    assert result.revision_count == 1
+    assert len(model.calls) == 2
+    assert "missing_explicit_capabilities" in model.calls[1][1]
+    assert "publish harvest schedule" in model.calls[1][1]
 
 
 async def test_independent_runs_do_not_share_prompt_or_revision_state() -> None:

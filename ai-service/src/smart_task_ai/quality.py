@@ -16,12 +16,83 @@ PASSING_SCORE = 75
 SIMILARITY_THRESHOLD = 0.82
 MIN_USEFUL_DESCRIPTION_LENGTH = 60
 MIN_USEFUL_CRITERIA = 2
+GENERIC_CAPABILITY_TOKENS = {
+    "a",
+    "an",
+    "the",
+    "allow",
+    "build",
+    "create",
+    "customer",
+    "customers",
+    "develop",
+    "enable",
+    "expose",
+    "facilitate",
+    "handle",
+    "implement",
+    "manage",
+    "organize",
+    "provide",
+    "receive",
+    "resident",
+    "residents",
+    "shared",
+    "support",
+    "system",
+    "user",
+    "users",
+}
+NON_ENFORCEABLE_GOAL_VERBS = {"build", "develop", "organize"}
 
 
 def normalize_title(title: str) -> str:
     """Normalize superficial title differences before comparing ticket intent."""
     words = re.findall(r"[a-z0-9]+", title.casefold())
     return " ".join(words)
+
+
+def normalized_tokens(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", text.casefold()))
+
+
+def word_forms(word: str) -> set[str]:
+    base = word[:-1] if word.endswith("s") and not word.endswith("ss") else word
+    forms = {word, base, f"{base}s"}
+    if base.endswith("e"):
+        forms.update({f"{base}d", f"{base[:-1]}ing", f"{base[:-1]}ings"})
+    else:
+        forms.update({f"{base}ed", f"{base}ing", f"{base}ings"})
+        if len(base) >= 3 and base[-1] not in "aeiou" and base[-2] in "aeiou":
+            forms.update({f"{base}{base[-1]}ed", f"{base}{base[-1]}ing"})
+    return forms
+
+
+def capability_matches_ticket(capability: str, ticket_tokens: set[str]) -> bool:
+    ordered_tokens = re.findall(r"[a-z0-9]+", capability.casefold())
+    if ordered_tokens and ordered_tokens[0] in NON_ENFORCEABLE_GOAL_VERBS:
+        return True
+    capability_tokens = set(ordered_tokens) - GENERIC_CAPABILITY_TOKENS
+    return not capability_tokens or all(
+        word_forms(token) & ticket_tokens for token in capability_tokens
+    )
+
+
+def find_missing_capabilities(draft: ProjectDraft, capabilities: list[str]) -> list[str]:
+    ticket_token_sets = [
+        normalized_tokens(
+            "\n".join((ticket.title, ticket.description, *ticket.acceptance_criteria))
+        )
+        for ticket in draft.tickets
+    ]
+    return [
+        capability
+        for capability in capabilities
+        if not any(
+            capability_matches_ticket(capability, ticket_tokens)
+            for ticket_tokens in ticket_token_sets
+        )
+    ]
 
 
 def evaluate_draft(draft: ProjectDraft) -> QualityReport:

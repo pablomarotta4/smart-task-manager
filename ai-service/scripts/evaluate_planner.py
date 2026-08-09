@@ -27,14 +27,13 @@ async def run() -> int:
     raw_cases = cast(list[object], json.loads(args.cases.read_text()))
     cases = [EvaluationCase.model_validate(case) for case in raw_cases]
     settings = Settings()
-    planner = ProjectPlanner(
-        OllamaPlanningModel(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-            timeout_seconds=settings.ollama_timeout_seconds,
-            temperature=settings.ollama_temperature,
-        )
+    model = OllamaPlanningModel(
+        base_url=settings.ollama_base_url,
+        model=settings.ollama_model,
+        timeout_seconds=settings.ollama_timeout_seconds,
+        temperature=settings.ollama_temperature,
     )
+    planner = ProjectPlanner(model, brief_analyzer=model)
     summary = await evaluate_cases(cases, planner)
     print(summary.model_dump_json(indent=2))
     return 0 if summary.passed_cases == summary.total_cases else 1

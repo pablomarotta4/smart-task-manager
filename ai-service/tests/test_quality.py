@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from smart_task_ai.contracts import Priority, ProjectDraft, TicketDraft
-from smart_task_ai.quality import evaluate_draft, normalize_title
+from smart_task_ai.quality import evaluate_draft, find_missing_capabilities, normalize_title
 
 
 def ticket(client_id: str, title: str, *, description: str | None = None) -> TicketDraft:
@@ -96,3 +96,29 @@ def test_thin_descriptions_and_acceptance_criteria_reduce_sufficiency() -> None:
 
 def test_title_normalization_ignores_case_punctuation_and_spacing() -> None:
     assert normalize_title("  Build THE API!!! ") == normalize_title("build the api")
+
+
+def test_capability_coverage_matches_inflected_action_words() -> None:
+    plan = adequate_draft()
+    plan.tickets[0].title = "Facilitate Tool Borrowing Process"
+    plan.tickets[0].description = (
+        "Record when a resident is borrowing a shared tool and identify the borrower and due date."
+    )
+
+    assert find_missing_capabilities(plan, ["borrow tools"]) == []
+    assert find_missing_capabilities(plan, ["return tools"]) == ["return tools"]
+
+
+def test_capability_coverage_ignores_broad_goal_verbs_actors_and_context_modifiers() -> None:
+    plan = adequate_draft()
+    plan.tickets[0].title = "Publish Tool Listings"
+    plan.tickets[1].title = "Coordinate Device Pickup"
+
+    assert find_missing_capabilities(
+        plan,
+        [
+            "organize an electronics repair shop",
+            "list shared tools",
+            "manage customer pickup",
+        ],
+    ) == []

@@ -11,4 +11,3 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.2:3b"
     ollama_timeout_seconds: float = Field(default=60, gt=0, le=300)
     ollama_temperature: float = Field(default=0.2, ge=0, le=1)
-

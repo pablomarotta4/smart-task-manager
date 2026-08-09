@@ -1,6 +1,7 @@
 package com.pablomarotta.smart_task_manager.exception;
 
 import com.pablomarotta.smart_task_manager.dto.ErrorDetails;
+import com.pablomarotta.smart_task_manager.client.AIPlanningUnavailableException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -144,5 +145,19 @@ public class GlobalExceptionHandler {
                 ex.getStatusCode().value()
         );
         return new org.springframework.http.ResponseEntity<>(errorDetails, ex.getStatusCode());
+    }
+
+    @ExceptionHandler(AIPlanningUnavailableException.class)
+    @ResponseStatus(HttpStatus.BAD_GATEWAY)
+    public ErrorDetails handleAIPlanningUnavailableException(
+            AIPlanningUnavailableException ex,
+            WebRequest request
+    ) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                "AI planning service is unavailable",
+                request.getDescription(false),
+                HttpStatus.BAD_GATEWAY.value()
+        );
     }
 }

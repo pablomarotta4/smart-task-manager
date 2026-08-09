@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from smart_task_ai.contracts import ProjectDraft
+from smart_task_ai.contracts import BriefAnalysis, ProjectDraft
 
 
 class PlanningModel(Protocol):
@@ -13,3 +13,8 @@ class PlanningModel(Protocol):
 
     async def generate(self, *, system_prompt: str, user_prompt: str) -> ProjectDraft: ...
 
+
+class BriefAnalyzer(Protocol):
+    """Provider-neutral boundary for extracting explicit brief capabilities."""
+
+    async def analyze(self, *, system_prompt: str, user_prompt: str) -> BriefAnalysis: ...

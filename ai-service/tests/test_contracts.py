@@ -93,3 +93,11 @@ def test_rejects_invalid_priority_and_thin_ticket_content() -> None:
 
     with pytest.raises(ValidationError):
         TicketDraft.model_validate(payload)
+
+
+def test_rejects_estimates_below_the_confirmation_contract_minimum() -> None:
+    payload = ticket("valid").model_dump(mode="json")
+    payload["estimated_hours"] = 0.05
+
+    with pytest.raises(ValidationError):
+        TicketDraft.model_validate(payload)

@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from smart_task_ai.contracts import Priority, ProjectDraft, TicketDraft
+from smart_task_ai.contracts import BriefAnalysis, Priority, ProjectDraft, TicketDraft
 from smart_task_ai.ollama import OllamaPlanningModel, ProviderResponseError, ProviderTimeout
 
 
@@ -49,6 +49,11 @@ async def test_sends_schema_constrained_chat_request_and_parses_draft() -> None:
         assert payload["model"] == "llama-test"
         assert payload["stream"] is False
         assert payload["format"]["type"] == "object"
+        assert "$defs" not in payload["format"]
+        assert payload["format"]["properties"]["tickets"]["items"]["type"] == "object"
+        grammar_schema = json.dumps(payload["format"])
+        for unsupported_bound in ("minLength", "maxLength", "minItems", "maxItems", "pattern"):
+            assert unsupported_bound not in grammar_schema
         assert payload["options"] == {"temperature": 0.2}
         assert payload["messages"][0]["role"] == "system"
         assert payload["messages"][1]["role"] == "user"
@@ -74,6 +79,45 @@ async def test_maps_http_timeout_to_provider_timeout() -> None:
             await model.generate(system_prompt="system", user_prompt="user")
 
 
+async def test_requests_and_parses_brief_analysis() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["format"]["required"] == ["explicit_capabilities"]
+        assert payload["messages"][0] == {"role": "system", "content": "analysis system"}
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "content": '{"explicit_capabilities":["return borrowed tools"]}'
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        model = OllamaPlanningModel(base_url="http://ollama", model="test", client=client)
+        result = await model.analyze(system_prompt="analysis system", user_prompt="analysis user")
+
+    assert result == BriefAnalysis(explicit_capabilities=["return borrowed tools"])
+
+
+async def test_retries_one_incomplete_structured_generation() -> None:
+    draft = good_draft()
+    call_count = 0
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        content = '{"name":"truncated' if call_count == 1 else draft.model_dump_json()
+        return httpx.Response(200, json={"message": {"content": content}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        model = OllamaPlanningModel(base_url="http://ollama", model="test", client=client)
+        result = await model.generate(system_prompt="system", user_prompt="user")
+
+    assert result == draft
+    assert call_count == 2
+
+
 @pytest.mark.parametrize(
     "response",
     [
@@ -90,4 +134,3 @@ async def test_rejects_upstream_and_malformed_responses(response: httpx.Response
         model = OllamaPlanningModel(base_url="http://ollama", model="test", client=client)
         with pytest.raises(ProviderResponseError):
             await model.generate(system_prompt="system", user_prompt="user")
-

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.UUID;
 
 @Repository
 public interface TaskRepository extends JpaRepository<Task, Long> {
@@ -25,4 +26,6 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     List<Task> findByDueDateBeforeAndStatusNot(LocalDate date, Status status);
     
     List<Task> findByTitleContainingIgnoreCase(String title);
+
+    List<Task> findByGenerationRunIdOrderByPositionAsc(UUID generationRunId);
 }

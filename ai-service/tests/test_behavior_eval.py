@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from smart_task_ai.contracts import Priority, ProjectDraft, TicketDraft
-from smart_task_ai.evaluation import EvaluationCase, evaluate_cases
+from smart_task_ai.evaluation import EvaluationCase, ExpectedConcept, evaluate_cases
 from smart_task_ai.planner import ProjectPlanner
 
 
@@ -115,3 +115,52 @@ async def test_behavior_suite_keeps_persistently_weak_output_visible() -> None:
     assert "duplicate_titles" in summary.results[0].issue_codes
     assert summary.results[0].revision_count == 1
     assert model.call_count == 2
+
+
+async def test_behavior_suite_fails_when_an_explicit_capability_is_missing() -> None:
+    cases = [
+        EvaluationCase(
+            id="tool-library",
+            prompt="Let residents list, reserve, borrow, and return shared tools",
+            required_concepts=[
+                ExpectedConcept(
+                    name="borrowing workflow", any_of=["borrow tool", "check out tool"]
+                ),
+                ExpectedConcept(
+                    name="return workflow",
+                    any_of=["tool return", "mark a tool as returned", "check in tool"],
+                ),
+            ],
+        )
+    ]
+    model = ScriptedModel([good_draft("Tool Library")])
+
+    summary = await evaluate_cases(cases, ProjectPlanner(model))
+
+    assert summary.passed_cases == 0
+    assert summary.results[0].passed is False
+    assert summary.results[0].missing_concepts == ["borrowing workflow", "return workflow"]
+    assert "missing_required_concepts" in summary.results[0].issue_codes
+
+
+async def test_concept_matching_tolerates_punctuation_and_intervening_words() -> None:
+    covered = good_draft("Tool Library")
+    covered.tickets[0].title = "Facilitate Tool Borrowing Process"
+    covered.tickets[0].description = (
+        "Allow a resident to (borrow) a shared tool after reservation and record the borrower, "
+        "checkout time, and expected return date."
+    )
+    cases = [
+        EvaluationCase(
+            id="tool-borrowing",
+            prompt="Let residents borrow shared tools from a neighborhood library",
+            required_concepts=[
+                ExpectedConcept(name="borrowing workflow", any_of=["borrow a tool"])
+            ],
+        )
+    ]
+
+    summary = await evaluate_cases(cases, ProjectPlanner(ScriptedModel([covered])))
+
+    assert summary.passed_cases == 1
+    assert summary.results[0].missing_concepts == []

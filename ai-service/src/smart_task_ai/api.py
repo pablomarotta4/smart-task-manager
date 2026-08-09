@@ -31,7 +31,7 @@ def create_app(*, planner: PlanningService | None = None) -> FastAPI:
             timeout_seconds=settings.ollama_timeout_seconds,
             temperature=settings.ollama_temperature,
         )
-        planner = ProjectPlanner(model)
+        planner = ProjectPlanner(model, brief_analyzer=model)
 
     app = FastAPI(title="Smart Task AI", version="1.0.0")
     router = APIRouter()

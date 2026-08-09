@@ -222,4 +222,3 @@
 5. If Ollama is available, run the live behavior evaluation and report model/version/results separately; otherwise document that only the optional live check is unavailable.
 6. Review the diff for authz, transaction boundaries, idempotency, prompt leakage, unbounded graph loops, and unrelated changes.
 7. Commit logical increments with Conventional Commits and leave the feature branch clean.
-
