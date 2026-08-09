@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { ApiError, apiClient } from "./api";
+import DraftEditor from "./components/DraftEditor";
 
 const SESSION_KEY = "smart-task-session";
 
@@ -22,6 +23,8 @@ export default function App({ client = apiClient }) {
   const [credentials, setCredentials] = useState({ username: "", password: "" });
   const [prompt, setPrompt] = useState("");
   const [draftResponse, setDraftResponse] = useState(null);
+  const [editableDraft, setEditableDraft] = useState(null);
+  const [confirmation, setConfirmation] = useState(null);
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
 
@@ -56,6 +59,8 @@ export default function App({ client = apiClient }) {
         prompt: prompt.trim(),
       });
       setDraftResponse(response);
+      setEditableDraft(structuredClone(response.draft));
+      setConfirmation(null);
       setPhase("reviewing");
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) {
@@ -67,10 +72,43 @@ export default function App({ client = apiClient }) {
     }
   };
 
+  const handleConfirm = async (event) => {
+    event.preventDefault();
+    setError("");
+    setPhase("confirming");
+    try {
+      const response = await client.confirmProject({
+        token: session.token,
+        runId: draftResponse.runId,
+        draft: editableDraft,
+      });
+      setConfirmation(response);
+      setPhase("confirmed");
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      }
+      setError(errorMessage(requestError));
+      setPhase("reviewing");
+    }
+  };
+
+  const handleStartOver = () => {
+    setPrompt("");
+    setDraftResponse(null);
+    setEditableDraft(null);
+    setConfirmation(null);
+    setError("");
+    setPhase("idle");
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setSession(null);
     setDraftResponse(null);
+    setEditableDraft(null);
+    setConfirmation(null);
     setError("");
     setPhase("idle");
   };
@@ -157,12 +195,31 @@ export default function App({ client = apiClient }) {
         {error ? <p role="alert">{error}</p> : null}
       </section>
 
-      {draftResponse ? (
-        <section aria-labelledby="draft-title">
-          <p>02 / Draft</p>
-          <h2 id="draft-title">{draftResponse.draft.name}</h2>
-          <p>{draftResponse.draft.objective}</p>
-          <p>{draftResponse.draft.tickets.length} proposed tickets</p>
+      {draftResponse && editableDraft && !confirmation ? (
+        <DraftEditor
+          draft={editableDraft}
+          quality={draftResponse.quality}
+          model={draftResponse.model}
+          revisionCount={draftResponse.revisionCount}
+          confirming={phase === "confirming"}
+          onChange={setEditableDraft}
+          onConfirm={handleConfirm}
+        />
+      ) : null}
+
+      {phase === "confirming" ? <p role="status">Creating your project and tickets…</p> : null}
+
+      {confirmation ? (
+        <section aria-labelledby="confirmation-title">
+          <p>03 / Created</p>
+          <h2 id="confirmation-title">Project created</h2>
+          <p>
+            Project #{confirmation.projectId} · {confirmation.projectName}
+          </p>
+          <p>{confirmation.taskIds.length} tickets are now ready in your task board.</p>
+          <button type="button" onClick={handleStartOver}>
+            Plan another project
+          </button>
         </section>
       ) : null}
     </main>

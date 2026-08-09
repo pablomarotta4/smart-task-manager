@@ -91,6 +91,16 @@ const logIn = async (user, client) => {
   });
 };
 
+const generateDraft = async (user, client) => {
+  await logIn(user, client);
+  await user.type(
+    screen.getByLabelText(/describe your project/i),
+    "Build a home renovation plan for redesigning and delivering a new kitchen",
+  );
+  await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+  await screen.findByRole("heading", { name: "Kitchen Redesign Project" });
+};
+
 describe("AI project workshop", () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -150,5 +160,78 @@ describe("AI project workshop", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("AI planning service is unavailable");
     expect(promptField).toHaveValue(prompt);
+  });
+
+  it("shows quality evidence and lets the user edit ticket content", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const weakDraft = structuredClone(generatedDraft);
+    weakDraft.quality = {
+      ...weakDraft.quality,
+      score: 65,
+      passed: false,
+      issues: [
+        {
+          code: "missing_explicit_capabilities",
+          message: "Tickets must explicitly implement contractor selection",
+          ticket_ids: [],
+        },
+      ],
+    };
+    client.generateProject.mockResolvedValue(weakDraft);
+    render(<App client={client} />);
+
+    await generateDraft(user, client);
+
+    expect(screen.getByText(/needs attention/i)).toBeInTheDocument();
+    expect(screen.getByText("65 / 100")).toBeInTheDocument();
+    expect(
+      screen.getByText(/tickets must explicitly implement contractor selection/i),
+    ).toBeInTheDocument();
+
+    const firstTitle = screen.getByLabelText(/title for ticket 1/i);
+    await user.clear(firstTitle);
+    await user.type(firstTitle, "Document kitchen requirements with the homeowner");
+    expect(firstTitle).toHaveValue("Document kitchen requirements with the homeowner");
+  });
+
+  it("confirms the edited draft and reports the created project", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmProject.mockResolvedValue({
+      runId: "run-1",
+      projectId: 42,
+      projectName: "Kitchen Redesign Project",
+      taskIds: [101, 102, 103],
+      alreadyConfirmed: false,
+    });
+    render(<App client={client} />);
+    await generateDraft(user, client);
+
+    const firstTitle = screen.getByLabelText(/title for ticket 1/i);
+    await user.clear(firstTitle);
+    await user.type(firstTitle, "Document kitchen requirements with the homeowner");
+    const confirmButton = screen.getByRole("button", { name: /confirm and create project/i });
+    const invalidFieldIds = Array.from(confirmButton.closest("form").elements)
+      .filter((field) => !field.checkValidity())
+      .map((field) => field.id);
+    expect(invalidFieldIds).toEqual([]);
+    await user.click(confirmButton);
+
+    expect(client.confirmProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-1",
+      draft: expect.objectContaining({
+        tickets: expect.arrayContaining([
+          expect.objectContaining({
+            client_id: "design-kitchen",
+            title: "Document kitchen requirements with the homeowner",
+          }),
+        ]),
+      }),
+    });
+    expect(await screen.findByRole("heading", { name: /project created/i })).toBeInTheDocument();
+    expect(screen.getByText(/project #42/i)).toBeInTheDocument();
+    expect(screen.getByText(/3 tickets/i)).toBeInTheDocument();
   });
 });
