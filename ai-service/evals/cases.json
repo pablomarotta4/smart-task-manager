@@ -1,0 +1,14 @@
+[
+  {
+    "id": "personal-meal-planner",
+    "prompt": "Build a personal meal planning app that creates a weekly plan and shopping list"
+  },
+  {
+    "id": "repair-shop-workflow",
+    "prompt": "Organize a small electronics repair shop from intake through customer pickup"
+  },
+  {
+    "id": "service-status-api",
+    "prompt": "Build a service status API that receives health signals and exposes current incidents"
+  }
+]
