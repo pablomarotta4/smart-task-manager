@@ -115,84 +115,152 @@ export default function App({ client = apiClient }) {
 
   if (!session) {
     return (
-      <main>
-        <section aria-labelledby="login-title">
-          <p>Smart Task Manager</p>
-          <h1 id="login-title">Enter the project workshop</h1>
-          <p>Sign in to turn a plain-language brief into an editable first backlog.</p>
+      <main className="login-shell">
+        <div className="paper-noise" aria-hidden="true" />
+        <section className="login-intro" aria-label="Smart Task Manager introduction">
+          <div className="brand-lockup">
+            <span className="brand-mark">STM</span>
+            <span>Smart Task Manager</span>
+          </div>
+          <div className="login-statement">
+            <p className="eyebrow">From idea to first move</p>
+            <p className="display-statement">
+              Make the work <em>clear.</em>
+            </p>
+            <p className="login-lede">
+              Shape a rough idea into a quality-checked project and an actionable first backlog.
+            </p>
+          </div>
+          <div className="process-strip" aria-label="Planning workflow">
+            <span>Brief</span>
+            <span>Draft</span>
+            <span>Review</span>
+            <span>Create</span>
+          </div>
+        </section>
 
-          <form onSubmit={handleLogin}>
-            <label htmlFor="username">Username</label>
-            <input
-              id="username"
-              name="username"
-              autoComplete="username"
-              value={credentials.username}
-              onChange={handleCredentialChange}
-              required
-            />
+        <section className="login-panel" aria-labelledby="login-title">
+          <div className="login-card">
+            <span className="status-chip">Local workspace</span>
+            <p className="section-index">01 / Access</p>
+            <h1 id="login-title">Enter the project workshop</h1>
+            <p className="muted-copy">
+              Sign in to turn a plain-language brief into an editable first backlog.
+            </p>
 
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              value={credentials.password}
-              onChange={handleCredentialChange}
-              required
-            />
+            <form className="stacked-form" onSubmit={handleLogin}>
+              <div className="field-group">
+                <label htmlFor="username">Username</label>
+                <input
+                  id="username"
+                  name="username"
+                  autoComplete="username"
+                  value={credentials.username}
+                  onChange={handleCredentialChange}
+                  placeholder="pablo-local"
+                  required
+                />
+              </div>
 
-            {error ? <p role="alert">{error}</p> : null}
-            <button type="submit" disabled={phase === "logging-in"}>
-              {phase === "logging-in" ? "Signing in…" : "Enter workshop"}
-            </button>
-          </form>
+              <div className="field-group">
+                <label htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={credentials.password}
+                  onChange={handleCredentialChange}
+                  placeholder="Your local test password"
+                  required
+                />
+              </div>
+
+              {error ? <p className="error-banner" role="alert">{error}</p> : null}
+              <button
+                className="primary-action"
+                type="submit"
+                disabled={phase === "logging-in"}
+                aria-busy={phase === "logging-in"}
+              >
+                <span>{phase === "logging-in" ? "Signing in…" : "Enter workshop"}</span>
+                <span aria-hidden="true">↗</span>
+              </button>
+            </form>
+            <p className="local-note">Credentials stay in this browser session only.</p>
+          </div>
         </section>
       </main>
     );
   }
 
   return (
-    <main>
-      <header>
-        <div>
-          <p>Project workshop</p>
-          <p>{session.user.fullName ?? session.user.username}</p>
+    <main className="workshop-shell">
+      <div className="paper-noise" aria-hidden="true" />
+      <header className="topbar">
+        <div className="brand-lockup">
+          <span className="brand-mark">STM</span>
+          <div>
+            <p>Project workshop</p>
+            <p className="user-name">{session.user.fullName ?? session.user.username}</p>
+          </div>
         </div>
-        <button type="button" onClick={handleLogout}>
-          Log out
+        <button className="text-action" type="button" onClick={handleLogout}>
+          Log out <span aria-hidden="true">↗</span>
         </button>
       </header>
 
-      <section aria-labelledby="prompt-title">
-        <p>01 / Brief</p>
-        <h1 id="prompt-title">What are we building?</h1>
-        <p>Describe the outcome in everyday language. Include the important capabilities.</p>
+      <section className="prompt-stage" aria-labelledby="prompt-title">
+        <div className="prompt-heading">
+          <p className="section-index">01 / Brief</p>
+          <h1 id="prompt-title">What are we building?</h1>
+          <p className="muted-copy">
+            Describe the outcome in everyday language. Name the capabilities that cannot be missed.
+          </p>
+          <div className="prompt-principle">
+            <span aria-hidden="true">✦</span>
+            <p>Specific verbs make stronger tickets: list, reserve, track, schedule, approve.</p>
+          </div>
+        </div>
 
-        <form onSubmit={handleGenerate}>
-          <label htmlFor="project-prompt">Describe your project</label>
-          <textarea
-            id="project-prompt"
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            minLength={10}
-            maxLength={4000}
-            rows={6}
-            required
-          />
-          <button
-            type="submit"
-            disabled={phase === "generating" || prompt.trim().length < 10}
-          >
-            {phase === "generating" ? "Generating…" : "Generate first plan"}
-          </button>
-        </form>
+        <div className="prompt-workbench">
+          <form onSubmit={handleGenerate}>
+            <div className="prompt-label-row">
+              <label htmlFor="project-prompt">Describe your project</label>
+              <span>{prompt.length} / 4000</span>
+            </div>
+            <textarea
+              id="project-prompt"
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+              minLength={10}
+              maxLength={4000}
+              rows={7}
+              placeholder="Build a neighborhood tool library where residents can list, reserve, borrow, and return shared tools…"
+              required
+            />
+            <button
+              className="primary-action"
+              type="submit"
+              disabled={phase === "generating" || prompt.trim().length < 10}
+              aria-busy={phase === "generating"}
+            >
+              <span>{phase === "generating" ? "Generating…" : "Generate first plan"}</span>
+              <span aria-hidden="true">{phase === "generating" ? "◌" : "↗"}</span>
+            </button>
+          </form>
 
-        {phase === "generating" ? (
-          <p role="status">Building your first backlog. Local generation can take up to 90 seconds.</p>
-        ) : null}
-        {error ? <p role="alert">{error}</p> : null}
+          {phase === "generating" ? (
+            <div className="generation-status" role="status">
+              <span className="status-orbit" aria-hidden="true" />
+              <div>
+                <strong>Building your first backlog</strong>
+                <p>Analyzing the brief, drafting tickets, and checking quality. Up to 90 seconds.</p>
+              </div>
+            </div>
+          ) : null}
+          {error ? <p className="error-banner" role="alert">{error}</p> : null}
+        </div>
       </section>
 
       {draftResponse && editableDraft && !confirmation ? (
@@ -207,18 +275,23 @@ export default function App({ client = apiClient }) {
         />
       ) : null}
 
-      {phase === "confirming" ? <p role="status">Creating your project and tickets…</p> : null}
+      {phase === "confirming" ? (
+        <p className="floating-status" role="status">Creating your project and tickets…</p>
+      ) : null}
 
       {confirmation ? (
-        <section aria-labelledby="confirmation-title">
-          <p>03 / Created</p>
+        <section className="confirmation-card" aria-labelledby="confirmation-title">
+          <div className="confirmation-seal" aria-hidden="true">✓</div>
+          <p className="section-index">03 / Created</p>
           <h2 id="confirmation-title">Project created</h2>
-          <p>
+          <p className="confirmation-project">
             Project #{confirmation.projectId} · {confirmation.projectName}
           </p>
-          <p>{confirmation.taskIds.length} tickets are now ready in your task board.</p>
-          <button type="button" onClick={handleStartOver}>
-            Plan another project
+          <p className="muted-copy">
+            {confirmation.taskIds.length} tickets are now ready in your task board.
+          </p>
+          <button className="primary-action" type="button" onClick={handleStartOver}>
+            <span>Plan another project</span><span aria-hidden="true">↗</span>
           </button>
         </section>
       ) : null}

@@ -13,41 +13,52 @@ export default function TicketEditor({ ticket, index, onChange }) {
   };
 
   return (
-    <article aria-labelledby={`ticket-${ticket.client_id}-heading`}>
-      <header>
-        <span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+    <article
+      className="ticket-card"
+      data-priority={ticket.priority.toLowerCase()}
+      aria-labelledby={`ticket-${ticket.client_id}-heading`}
+    >
+      <header className="ticket-header">
+        <span className="ticket-number" aria-hidden="true">
+          {String(index + 1).padStart(2, "0")}
+        </span>
         <div>
-          <p>{ticket.client_id}</p>
+          <p className="ticket-id">{ticket.client_id}</p>
           <h3 id={`ticket-${ticket.client_id}-heading`}>{ticket.title}</h3>
         </div>
+        <span className="priority-flag">{ticket.priority.toLowerCase()}</span>
       </header>
 
-      <div>
-        <label htmlFor={`ticket-${ticket.client_id}-title`}>Title for ticket {index + 1}</label>
-        <input
-          id={`ticket-${ticket.client_id}-title`}
-          value={ticket.title}
-          minLength={5}
-          maxLength={120}
-          onChange={(event) => updateField("title", event.target.value)}
-          required
-        />
+      <div className="ticket-body">
+        <div className="field-group">
+          <label htmlFor={`ticket-${ticket.client_id}-title`}>Title for ticket {index + 1}</label>
+          <input
+            id={`ticket-${ticket.client_id}-title`}
+            value={ticket.title}
+            minLength={5}
+            maxLength={120}
+            onChange={(event) => updateField("title", event.target.value)}
+            required
+          />
+        </div>
 
-        <label htmlFor={`ticket-${ticket.client_id}-description`}>
-          Description for ticket {index + 1}
-        </label>
-        <textarea
-          id={`ticket-${ticket.client_id}-description`}
-          value={ticket.description}
-          minLength={20}
-          maxLength={2000}
-          rows={4}
-          onChange={(event) => updateField("description", event.target.value)}
-          required
-        />
+        <div className="field-group">
+          <label htmlFor={`ticket-${ticket.client_id}-description`}>
+            Description for ticket {index + 1}
+          </label>
+          <textarea
+            id={`ticket-${ticket.client_id}-description`}
+            value={ticket.description}
+            minLength={20}
+            maxLength={2000}
+            rows={4}
+            onChange={(event) => updateField("description", event.target.value)}
+            required
+          />
+        </div>
 
-        <div>
-          <div>
+        <div className="ticket-meta-grid">
+          <div className="field-group">
             <label htmlFor={`ticket-${ticket.client_id}-priority`}>Priority</label>
             <select
               id={`ticket-${ticket.client_id}-priority`}
@@ -62,7 +73,7 @@ export default function TicketEditor({ ticket, index, onChange }) {
             </select>
           </div>
 
-          <div>
+          <div className="field-group">
             <label htmlFor={`ticket-${ticket.client_id}-estimate`}>Estimated hours</label>
             <input
               id={`ticket-${ticket.client_id}-estimate`}
@@ -76,7 +87,7 @@ export default function TicketEditor({ ticket, index, onChange }) {
             />
           </div>
 
-          <div>
+          <div className="field-group">
             <label htmlFor={`ticket-${ticket.client_id}-due`}>Due in days</label>
             <input
               id={`ticket-${ticket.client_id}-due`}
@@ -90,7 +101,7 @@ export default function TicketEditor({ ticket, index, onChange }) {
             />
           </div>
 
-          <div>
+          <div className="field-group">
             <label htmlFor={`ticket-${ticket.client_id}-category`}>Category</label>
             <input
               id={`ticket-${ticket.client_id}-category`}
@@ -102,10 +113,11 @@ export default function TicketEditor({ ticket, index, onChange }) {
           </div>
         </div>
 
-        <fieldset>
+        <fieldset className="criteria-editor">
           <legend>Acceptance criteria</legend>
           {ticket.acceptance_criteria.map((criterion, criterionIndex) => (
-            <div key={`${ticket.client_id}-criterion-${criterionIndex}`}>
+            <div className="criterion-row" key={`${ticket.client_id}-criterion-${criterionIndex}`}>
+              <span className="criterion-check" aria-hidden="true">✓</span>
               <label htmlFor={`${ticket.client_id}-criterion-${criterionIndex}`}>
                 Criterion {criterionIndex + 1}
               </label>
@@ -122,16 +134,16 @@ export default function TicketEditor({ ticket, index, onChange }) {
           ))}
         </fieldset>
 
-        <div>
-          <span>Depends on</span>
+        <div className="dependency-row">
+          <span className="dependency-label">Depends on</span>
           {ticket.depends_on.length > 0 ? (
-            <ul aria-label={`Dependencies for ticket ${index + 1}`}>
+            <ul className="dependency-list" aria-label={`Dependencies for ticket ${index + 1}`}>
               {ticket.depends_on.map((dependency) => (
                 <li key={dependency}>{dependency}</li>
               ))}
             </ul>
           ) : (
-            <p>Starts the sequence</p>
+            <p className="dependency-root">Starts the sequence</p>
           )}
         </div>
       </div>

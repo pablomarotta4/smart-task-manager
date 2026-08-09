@@ -135,6 +135,10 @@ describe("AI project workshop", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent(/building your first backlog/i);
     expect(screen.getByRole("button", { name: /generating/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /generating/i })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
 
     await act(async () => {
       resolveGeneration(generatedDraft);
@@ -185,6 +189,11 @@ describe("AI project workshop", () => {
 
     expect(screen.getByText(/needs attention/i)).toBeInTheDocument();
     expect(screen.getByText("65 / 100")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: /plan quality/i })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: /quality score/i })).toHaveAttribute(
+      "aria-valuenow",
+      "65",
+    );
     expect(
       screen.getByText(/tickets must explicitly implement contractor selection/i),
     ).toBeInTheDocument();

@@ -29,42 +29,49 @@ export default function DraftEditor({
   };
 
   return (
-    <section aria-labelledby="draft-title">
-      <div>
-        <div>
-          <p>02 / Review</p>
+    <section className="draft-stage" aria-labelledby="draft-title">
+      <div className="draft-heading-grid">
+        <div className="draft-heading-copy">
+          <p className="section-index">02 / Review</p>
           <h2 id="draft-title">{draft.name}</h2>
-          <p>Edit the project and ticket language before anything is written to the task board.</p>
+          <p className="muted-copy">
+            Edit the project and ticket language before anything is written to the task board.
+          </p>
         </div>
         <QualityPanel quality={quality} model={model} revisionCount={revisionCount} />
       </div>
 
-      <form onSubmit={onConfirm}>
-        <section aria-labelledby="project-details-title">
+      <form className="draft-form" onSubmit={onConfirm}>
+        <section className="project-details-card" aria-labelledby="project-details-title">
+          <p className="section-index">Project definition</p>
           <h3 id="project-details-title">Project details</h3>
-          <label htmlFor="draft-name">Project name</label>
-          <input
-            id="draft-name"
-            value={draft.name}
-            minLength={3}
-            maxLength={150}
-            onChange={(event) => updateProjectField("name", event.target.value)}
-            required
-          />
+          <div className="field-group">
+            <label htmlFor="draft-name">Project name</label>
+            <input
+              id="draft-name"
+              value={draft.name}
+              minLength={3}
+              maxLength={150}
+              onChange={(event) => updateProjectField("name", event.target.value)}
+              required
+            />
+          </div>
 
-          <label htmlFor="draft-objective">Objective</label>
-          <textarea
-            id="draft-objective"
-            value={draft.objective}
-            minLength={20}
-            maxLength={2000}
-            rows={4}
-            onChange={(event) => updateProjectField("objective", event.target.value)}
-            required
-          />
+          <div className="field-group">
+            <label htmlFor="draft-objective">Objective</label>
+            <textarea
+              id="draft-objective"
+              value={draft.objective}
+              minLength={20}
+              maxLength={2000}
+              rows={4}
+              onChange={(event) => updateProjectField("objective", event.target.value)}
+              required
+            />
+          </div>
 
           {draft.assumptions.length > 0 ? (
-            <fieldset>
+            <fieldset className="inline-list-editor">
               <legend>Assumptions</legend>
               {draft.assumptions.map((assumption, index) => (
                 <div key={`assumption-${index}`}>
@@ -85,7 +92,7 @@ export default function DraftEditor({
           ) : null}
 
           {draft.risks.length > 0 ? (
-            <fieldset>
+            <fieldset className="inline-list-editor">
               <legend>Risks</legend>
               {draft.risks.map((risk, index) => (
                 <div key={`risk-${index}`}>
@@ -104,28 +111,37 @@ export default function DraftEditor({
           ) : null}
         </section>
 
-        <section aria-labelledby="tickets-title">
-          <div>
-            <p>First backlog</p>
+        <section className="tickets-section" aria-labelledby="tickets-title">
+          <div className="tickets-heading">
+            <p className="section-index">First backlog</p>
             <h3 id="tickets-title">{draft.tickets.length} proposed tickets</h3>
+            <p>Ordered by dependency. Edit freely; identifiers and links stay stable.</p>
           </div>
-          {draft.tickets.map((ticket, index) => (
-            <TicketEditor
-              key={ticket.client_id}
-              ticket={ticket}
-              index={index}
-              onChange={(updatedTicket) => updateTicket(index, updatedTicket)}
-            />
-          ))}
+          <div className="ticket-sequence">
+            {draft.tickets.map((ticket, index) => (
+              <TicketEditor
+                key={ticket.client_id}
+                ticket={ticket}
+                index={index}
+                onChange={(updatedTicket) => updateTicket(index, updatedTicket)}
+              />
+            ))}
+          </div>
         </section>
 
-        <footer>
+        <footer className="confirmation-bar">
           <div>
             <strong>Human confirmation required</strong>
             <p>This creates one project and {draft.tickets.length} TODO tickets.</p>
           </div>
-          <button type="submit" disabled={confirming}>
-            {confirming ? "Creating project…" : "Confirm and create project"}
+          <button
+            className="primary-action"
+            type="submit"
+            disabled={confirming}
+            aria-busy={confirming}
+          >
+            <span>{confirming ? "Creating project…" : "Confirm and create project"}</span>
+            <span aria-hidden="true">{confirming ? "◌" : "↗"}</span>
           </button>
         </footer>
       </form>

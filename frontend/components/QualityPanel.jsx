@@ -9,14 +9,30 @@ export default function QualityPanel({ quality, model, revisionCount }) {
   ];
 
   return (
-    <aside aria-labelledby="quality-title">
-      <p>Quality check</p>
+    <aside
+      className={`quality-panel ${quality.passed ? "quality-pass" : "quality-warning"}`}
+      aria-label="Plan quality"
+      role="status"
+    >
+      <div className="quality-heading">
+        <p className="section-index">Quality check</p>
+        <span className="quality-dot" aria-hidden="true" />
+      </div>
       <h3 id="quality-title">{quality.passed ? "Ready to review" : "Needs attention"}</h3>
-      <p aria-label={`Quality score ${quality.score} out of 100`}>
+      <div
+        className="score-ring"
+        role="progressbar"
+        aria-label="Quality score"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={quality.score}
+        style={{ "--quality-score": `${quality.score * 3.6}deg` }}
+      >
         <strong>{quality.score} / 100</strong>
-      </p>
+        <span>plan score</span>
+      </div>
 
-      <dl>
+      <dl className="quality-metrics">
         {metrics.map(([label, value]) => (
           <div key={label}>
             <dt>{label}</dt>
@@ -26,7 +42,7 @@ export default function QualityPanel({ quality, model, revisionCount }) {
       </dl>
 
       {quality.issues.length > 0 ? (
-        <div>
+        <div className="quality-issues">
           <h4>What to improve</h4>
           <ul>
             {quality.issues.map((issue) => (
@@ -35,10 +51,12 @@ export default function QualityPanel({ quality, model, revisionCount }) {
           </ul>
         </div>
       ) : (
-        <p>The draft passed the coverage, actionability, and repetition checks.</p>
+        <p className="quality-note">
+          The draft passed the coverage, actionability, and repetition checks.
+        </p>
       )}
 
-      <p>
+      <p className="model-note">
         {model} · {revisionCount === 1 ? "1 AI revision" : "No AI revision"}
       </p>
     </aside>
