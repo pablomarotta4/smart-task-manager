@@ -42,7 +42,7 @@
 
 **Files:**
 
-- Modify: `src/test/java/com/pablomarotta/smart_task_manager/service/TaskServiceTest.java`
+- Create: `src/test/java/com/pablomarotta/smart_task_manager/service/TaskServiceTest.java`
 - Modify: `src/main/java/com/pablomarotta/smart_task_manager/dto/TaskResponse.java`
 - Modify: `src/main/java/com/pablomarotta/smart_task_manager/repository/TaskRepository.java`
 - Modify: `src/main/java/com/pablomarotta/smart_task_manager/repository/TaskAcceptanceCriterionRepository.java`
@@ -112,4 +112,3 @@
 **Step 5:** Exercise login → Projects → project #20 → tickets and confirmation → View project in a real browser at desktop and mobile widths.
 
 **Step 6:** Review the complete branch diff and commit with `feat(web): finish project browser experience`.
-

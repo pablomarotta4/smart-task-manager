@@ -8,6 +8,8 @@ import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
+import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
+import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,8 @@ import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -34,6 +38,8 @@ public class TaskService {
     private final UserRepository userRepository;
     private final ProjectRepository projectRepository;
     private final AIService aiService;
+    private final TaskAcceptanceCriterionRepository acceptanceCriterionRepository;
+    private final TaskDependencyRepository dependencyRepository;
 
     @Transactional
     public TaskResponse createTask(TaskRequest taskRequest) {
@@ -131,10 +137,50 @@ public class TaskService {
         return userResponse;
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getTasksByProjectId(Long projectId) {
-        return taskRepository.findByProjectId(projectId).stream()
-                .map(this::mapToResponse)
+        Map<Long, List<String>> acceptanceCriteria = acceptanceCriterionRepository
+                .findByProjectId(projectId)
+                .stream()
+                .collect(Collectors.groupingBy(
+                        criterion -> criterion.getTask().getId(),
+                        Collectors.mapping(
+                                com.pablomarotta.smart_task_manager.model.TaskAcceptanceCriterion::getCriterion,
+                                Collectors.toList()
+                        )
+                ));
+        Map<Long, List<String>> dependencies = dependencyRepository
+                .findByProjectId(projectId)
+                .stream()
+                .collect(Collectors.groupingBy(
+                        dependency -> dependency.getTask().getId(),
+                        Collectors.mapping(
+                                dependency -> dependency.getDependsOnTask().getPlanningClientId(),
+                                Collectors.toList()
+                        )
+                ));
+
+        return taskRepository.findByProjectIdOrderByPositionAsc(projectId).stream()
+                .map(task -> mapToProjectResponse(
+                        task,
+                        acceptanceCriteria.getOrDefault(task.getId(), List.of()),
+                        dependencies.getOrDefault(task.getId(), List.of())
+                ))
                 .toList();
+    }
+
+    private TaskResponse mapToProjectResponse(
+            Task task,
+            List<String> acceptanceCriteria,
+            List<String> dependencies
+    ) {
+        TaskResponse response = mapToResponse(task);
+        response.setEstimatedHours(task.getEstimatedHours());
+        response.setPlanningClientId(task.getPlanningClientId());
+        response.setAiSummary(task.getAiSummary());
+        response.setAcceptanceCriteria(acceptanceCriteria);
+        response.setDependsOn(dependencies);
+        return response;
     }
 
     public List<TaskResponse> getTasksByUserId(Long userId) {

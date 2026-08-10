@@ -5,6 +5,8 @@ import com.pablomarotta.smart_task_manager.model.Status;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.math.BigDecimal;
+import java.util.List;
 
 @Data
 public class TaskResponse {
@@ -17,6 +19,10 @@ public class TaskResponse {
     private Priority priority;
     private String category;
     private LocalDate dueDate;
+    private BigDecimal estimatedHours;
+    private String planningClientId;
+    private List<String> acceptanceCriteria = List.of();
+    private List<String> dependsOn = List.of();
 
     // Project info
     private Long projectId;
