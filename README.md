@@ -8,7 +8,7 @@ human confirmation.
 ## Architecture
 
 ```text
-React project workshop (login, prompt, draft editing, confirmation)
+React project workshop (login, prompt, draft editing, confirmation, project browser)
   -> Spring Boot API (auth, workflow, confirmation, database writes)
        -> FastAPI AI service (LangGraph, prompts, quality review)
             -> Ollama (replaceable model provider)
@@ -81,9 +81,10 @@ npm run dev
 ```
 
 Open `http://localhost:3000`. Sign in with an existing local account, describe a project, review the
-quality evidence, edit the proposed project and tickets, and confirm when the draft is ready. The UI
-does not persist anything until confirmation. Set `VITE_API_BASE_URL` to override the default Spring
-URL, `http://127.0.0.1:8080`.
+quality evidence, edit the proposed project and tickets, and confirm when the draft is ready. Open
+**Projects** to browse saved projects and inspect their ordered ticket details. The UI does not persist
+anything until confirmation. Set `VITE_API_BASE_URL` to override the default Spring URL,
+`http://127.0.0.1:8080`.
 
 Useful configuration:
 

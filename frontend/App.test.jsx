@@ -327,7 +327,35 @@ describe("AI project workshop", () => {
     expect(
       screen.getByText("A saved opportunity includes company, role, and source"),
     ).toBeInTheDocument();
+    expect(screen.getByText("Aug 14, 2026")).toBeInTheDocument();
     expect(screen.getByText("opportunity-intake")).toBeInTheDocument();
+  });
+
+  it("announces the selected navigation and project loading state", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveProjects;
+    client.getProjects.mockReturnValue(
+      new Promise((resolve) => {
+        resolveProjects = resolve;
+      }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    const projectsButton = screen.getByRole("button", { name: /^projects$/i });
+    await user.click(projectsButton);
+
+    expect(projectsButton).toHaveAttribute("aria-current", "page");
+    const projectsSection = screen.getByRole("heading", { name: /your projects/i })
+      .closest("section");
+    expect(projectsSection).toHaveAttribute("aria-busy", "true");
+
+    await act(async () => {
+      resolveProjects(savedProjects);
+    });
+
+    expect(projectsSection).toHaveAttribute("aria-busy", "false");
   });
 
   it("shows an empty project index", async () => {
@@ -355,6 +383,28 @@ describe("AI project workshop", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not load projects");
     expect(screen.getByRole("button", { name: /^workshop$/i })).toBeInTheDocument();
+  });
+
+  it("does not describe a failed backlog request as an empty project", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectTasks.mockRejectedValue(
+      new ApiError("Could not load the project backlog", { status: 500 }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: /job application tracker - initial backlog/i,
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not load the project backlog",
+    );
+    expect(screen.queryByText(/no tickets in this project/i)).not.toBeInTheDocument();
   });
 
   it("opens a newly confirmed project from the creation receipt", async () => {

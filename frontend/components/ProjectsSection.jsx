@@ -1,6 +1,13 @@
 const formatDate = (value) => {
   if (!value) return "Date unavailable";
-  const date = new Date(value);
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const date = dateOnlyMatch
+    ? new Date(
+        Number(dateOnlyMatch[1]),
+        Number(dateOnlyMatch[2]) - 1,
+        Number(dateOnlyMatch[3]),
+      )
+    : new Date(value);
   if (Number.isNaN(date.getTime())) return "Date unavailable";
   return new Intl.DateTimeFormat("en", {
     day: "2-digit",
@@ -29,7 +36,11 @@ export default function ProjectsSection({
   const loadingTasks = phase === "loading-tasks";
 
   return (
-    <section className="projects-stage" aria-labelledby="projects-title">
+    <section
+      className="projects-stage"
+      aria-labelledby="projects-title"
+      aria-busy={loadingProjects || loadingTasks}
+    >
       <header className="projects-hero">
         <p className="section-index">02 / Project archive</p>
         <h1 id="projects-title">Your projects</h1>
@@ -103,7 +114,7 @@ export default function ProjectsSection({
               </div>
             ) : null}
 
-            {selectedProject && !loadingTasks ? (
+            {selectedProject && !loadingTasks && !error ? (
               <article className="project-detail" aria-labelledby="selected-project-title">
                 <header className="project-detail-header">
                   <div>
