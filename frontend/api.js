@@ -24,17 +24,18 @@ export const createApiClient = ({
 } = {}) => {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
 
-  const request = async (path, { token, body } = {}) => {
+  const request = async (path, { method = "POST", token, body } = {}) => {
     let response;
     try {
-      response = await fetchImpl(`${normalizedBaseUrl}${path}`, {
-        method: "POST",
+      const requestOptions = {
+        method,
         headers: {
-          "Content-Type": "application/json",
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify(body),
-      });
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      };
+      response = await fetchImpl(`${normalizedBaseUrl}${path}`, requestOptions);
     } catch (error) {
       throw new ApiError("Cannot reach the Smart Task Manager API", {
         details: error instanceof Error ? error.message : String(error),
@@ -62,6 +63,12 @@ export const createApiClient = ({
       request(`/api/project-generation-runs/${runId}/confirm`, {
         token,
         body: { draft },
+      }),
+    getProjects: ({ token }) => request("/api/projects", { method: "GET", token }),
+    getProjectTasks: ({ token, projectId }) =>
+      request(`/api/tasks/project/${encodeURIComponent(projectId)}`, {
+        method: "GET",
+        token,
       }),
   };
 };

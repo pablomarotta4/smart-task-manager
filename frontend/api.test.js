@@ -86,4 +86,35 @@ describe("project API client", () => {
     );
     expect(ApiError.prototype).toBeInstanceOf(Error);
   });
+
+  it("loads project summaries with bearer authentication", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse([{ id: 20 }]));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.getProjects({ token: "jwt-token" });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://api.test/api/projects",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
+      }),
+    );
+    expect(fetchImpl.mock.calls[0][1]).not.toHaveProperty("body");
+  });
+
+  it("loads the selected project's tickets", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse([{ id: 101 }]));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.getProjectTasks({ token: "jwt-token", projectId: 20 });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://api.test/api/tasks/project/20",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
+      }),
+    );
+  });
 });
