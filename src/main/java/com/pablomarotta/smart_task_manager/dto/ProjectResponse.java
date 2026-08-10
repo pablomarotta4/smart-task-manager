@@ -7,6 +7,8 @@ public class ProjectResponse {
 
     private Long id;
     private String name;
+    private String objective;
+    private long taskCount;
 
     // Owner info
     private Long ownerId;

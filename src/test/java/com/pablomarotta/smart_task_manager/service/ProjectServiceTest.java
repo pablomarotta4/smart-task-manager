@@ -7,6 +7,7 @@ import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
+import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,6 +34,9 @@ class ProjectServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private TaskRepository taskRepository;
 
     @InjectMocks
     private ProjectService projectService;
@@ -108,11 +113,16 @@ class ProjectServiceTest {
         Project project2 = Project.builder()
                 .id(2L)
                 .name("Another Project")
+                .objective("Ship the next useful milestone")
                 .owner(owner)
-                .createdAt(java.time.LocalDateTime.now())
+                .createdAt(LocalDateTime.now().plusMinutes(1))
                 .build();
 
         when(projectRepository.findAll()).thenReturn(Arrays.asList(project, project2));
+        when(taskRepository.countTasksByProject()).thenReturn(List.of(
+                taskCount(1L, 3L),
+                taskCount(2L, 6L)
+        ));
 
         // Act
         List<ProjectResponse> projects = projectService.getAllProjects();
@@ -120,9 +130,13 @@ class ProjectServiceTest {
         // Assert
         assertNotNull(projects);
         assertEquals(2, projects.size());
-        assertEquals("Test Project", projects.get(0).getName());
-        assertEquals("Another Project", projects.get(1).getName());
+        assertEquals("Another Project", projects.get(0).getName());
+        assertEquals("Ship the next useful milestone", projects.get(0).getObjective());
+        assertEquals(6L, projects.get(0).getTaskCount());
+        assertEquals("Test Project", projects.get(1).getName());
+        assertEquals(3L, projects.get(1).getTaskCount());
         verify(projectRepository, times(1)).findAll();
+        verify(taskRepository, times(1)).countTasksByProject();
     }
 
     @Test
@@ -150,5 +164,19 @@ class ProjectServiceTest {
             projectService.getProjectById(99L);
         });
         verify(projectRepository, times(1)).findById(99L);
+    }
+
+    private TaskRepository.ProjectTaskCount taskCount(Long projectId, Long taskCount) {
+        return new TaskRepository.ProjectTaskCount() {
+            @Override
+            public Long getProjectId() {
+                return projectId;
+            }
+
+            @Override
+            public Long getTaskCount() {
+                return taskCount;
+            }
+        };
     }
 }
