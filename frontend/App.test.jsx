@@ -147,6 +147,38 @@ const savedOtherProjectTasks = [
     dependsOn: ["tool-inventory"],
     aiSummary: "Restore the critical reservation path.",
   },
+  {
+    id: 302,
+    projectId: 19,
+    title: "Catalog the remaining hand tools",
+    description: "Add the lower-priority inventory that has no target date yet.",
+    status: "TODO",
+    position: 1,
+    priority: "LOW",
+    category: "Inventory",
+    dueDate: null,
+    estimatedHours: 2,
+    planningClientId: "remaining-hand-tools",
+    acceptanceCriteria: ["Every available hand tool appears in the catalog"],
+    dependsOn: [],
+    aiSummary: "Complete the long-tail inventory after the critical path.",
+  },
+  {
+    id: 303,
+    projectId: 19,
+    title: "Reconcile the inventory audit",
+    description: "Close the inventory audit that passed its target date.",
+    status: "TODO",
+    position: 2,
+    priority: "LOW",
+    category: "Inventory",
+    dueDate: "2000-01-01",
+    estimatedHours: 1,
+    planningClientId: "overdue-inventory-audit",
+    acceptanceCriteria: ["The audit result matches the physical inventory"],
+    dependsOn: [],
+    aiSummary: "Surface an overdue task without promoting its priority.",
+  },
 ];
 
 const createClient = () => ({
@@ -489,6 +521,15 @@ describe("AI project workshop", () => {
       screen.getByRole("button", { name: /open create opportunity intake/i }),
     );
 
+    expect(screen.getByRole("dialog", { name: /edit create opportunity intake/i }))
+      .toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: /edit create opportunity intake/i }))
+      .not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /open create opportunity intake/i }),
+    );
     const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
     const title = within(panel).getByLabelText(/^title$/i);
     await user.clear(title);
@@ -532,6 +573,11 @@ describe("AI project workshop", () => {
     });
 
     expect(await screen.findByText("Repair the reservation handoff")).toBeInTheDocument();
+    expect(screen.getByText("Catalog the remaining hand tools")).toBeInTheDocument();
+    const overdueTicket = screen.getByRole("button", {
+      name: /open reconcile the inventory audit/i,
+    });
+    expect(within(overdueTicket).getByText(/^overdue$/i)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /blocked/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /due next/i })).toBeInTheDocument();
     expect(screen.getAllByText("Job Application Tracker - Initial Backlog").length)
@@ -547,6 +593,11 @@ describe("AI project workshop", () => {
     await logIn(user, client);
     await user.click(screen.getByRole("button", { name: /^board$/i }));
     await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /project settings/i }));
+    expect(screen.getByLabelText(/read-only project settings/i)).toHaveTextContent(
+      /current api does not support updating or deleting projects/i,
+    );
 
     await user.click(screen.getByRole("button", { name: /plan next phase/i }));
 

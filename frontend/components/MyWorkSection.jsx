@@ -10,10 +10,19 @@ const formatDate = (value) => {
   }).format(new Date(year, month - 1, day));
 };
 
+const localIsoDate = () => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+};
+
 function WorkTicket({ task, index, onSelectTask }) {
+  const overdue = task.dueDate && task.dueDate < localIsoDate();
+
   return (
     <button
-      className="work-ticket"
+      className={`work-ticket${overdue ? " is-overdue" : ""}`}
       type="button"
       onClick={() => onSelectTask(task)}
       aria-label={`Open ${task.title}`}
@@ -25,6 +34,7 @@ function WorkTicket({ task, index, onSelectTask }) {
         <span>{task.description}</span>
       </span>
       <span className="work-ticket-meta">
+        {overdue ? <span className="work-ticket-overdue">Overdue</span> : null}
         <span>{task.priority?.toLowerCase() ?? "no priority"}</span>
         <span>{formatDate(task.dueDate)}</span>
       </span>
@@ -55,8 +65,12 @@ export default function MyWorkSection({
   );
   const focusIds = new Set(focus.map((task) => task.id));
   const dueNext = openItems
-    .filter((task) => task.status !== "BLOCKED" && !focusIds.has(task.id) && task.dueDate)
-    .toSorted((left, right) => left.dueDate.localeCompare(right.dueDate));
+    .filter((task) => task.status !== "BLOCKED" && !focusIds.has(task.id))
+    .toSorted((left, right) => {
+      if (!left.dueDate) return right.dueDate ? 1 : 0;
+      if (!right.dueDate) return -1;
+      return left.dueDate.localeCompare(right.dueDate);
+    });
   const completed = items.filter((task) => task.status === "DONE").length;
 
   return (
@@ -137,7 +151,7 @@ export default function MyWorkSection({
                 <div>
                   {dueNext.length ? dueNext.map((task, index) => (
                     <WorkTicket key={task.id} task={task} index={index} onSelectTask={onSelectTask} />
-                  )) : <p className="work-empty-line">The remaining queue has no dated work.</p>}
+                  )) : <p className="work-empty-line">No remaining work is waiting.</p>}
                 </div>
               </section>
             </div>

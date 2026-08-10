@@ -8,7 +8,7 @@ human confirmation.
 ## Architecture
 
 ```text
-React project workshop (login, prompt, draft editing, confirmation, project browser)
+React workspace (planning workshop, project browser, execution board, personal queue, account)
   -> Spring Boot API (auth, workflow, confirmation, database writes)
        -> FastAPI AI service (LangGraph, prompts, quality review)
             -> Ollama (replaceable model provider)
@@ -81,10 +81,20 @@ npm run dev
 ```
 
 Open `http://localhost:3000`. Sign in with an existing local account, describe a project, review the
-quality evidence, edit the proposed project and tickets, and confirm when the draft is ready. Open
-**Projects** to browse saved projects and inspect their ordered ticket details. The UI does not persist
-anything until confirmation. Set `VITE_API_BASE_URL` to override the default Spring URL,
-`http://127.0.0.1:8080`.
+quality evidence, edit the proposed project and tickets, and confirm when the draft is ready.
+
+The authenticated workspace includes:
+
+- **Workshop** for AI-assisted project drafting and explicit confirmation.
+- **Projects** for browsing saved projects and their ordered ticket details.
+- **Board** for viewing project progress and editing ticket status, priority, copy, and due date.
+- **My work** for a cross-project focus, blocked, and due-next queue.
+- **Account** for reviewing the current local identity and clearing the browser session.
+
+Draft generation does not persist projects or tickets until confirmation. Ticket edits made from the
+Board or My work are saved immediately. AI follow-up planning opens a separate Workshop brief; it does
+not update the existing project because project mutation is not part of the current API. Set
+`VITE_API_BASE_URL` to override the default Spring URL, `http://127.0.0.1:8080`.
 
 Useful configuration:
 

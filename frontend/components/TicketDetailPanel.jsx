@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const STATUSES = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"];
 const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"];
@@ -12,6 +12,7 @@ export default function TicketDetailPanel({
   onClose,
   onSave,
 }) {
+  const closeButtonRef = useRef(null);
   const [draft, setDraft] = useState({
     title: task.title,
     description: task.description ?? "",
@@ -19,6 +20,20 @@ export default function TicketDetailPanel({
     priority: task.priority ?? "MEDIUM",
     dueDate: task.dueDate ?? "",
   });
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    closeButtonRef.current?.focus();
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -53,7 +68,13 @@ export default function TicketDetailPanel({
             <p className="section-index">Ticket #{task.id}</p>
             <h2 id={`edit-ticket-${task.id}`}>Edit {task.title}</h2>
           </div>
-          <button className="sheet-close" type="button" onClick={onClose} aria-label="Close ticket">
+          <button
+            ref={closeButtonRef}
+            className="sheet-close"
+            type="button"
+            onClick={onClose}
+            aria-label="Close ticket"
+          >
             ×
           </button>
         </header>
