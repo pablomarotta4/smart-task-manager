@@ -70,6 +70,17 @@ export const createApiClient = ({
         method: "GET",
         token,
       }),
+    updateTask: ({ token, taskId, task }) =>
+      request(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: "PUT",
+        token,
+        body: task,
+      }),
+    updateTaskStatus: ({ token, taskId, status }) =>
+      request(
+        `/api/tasks/${encodeURIComponent(taskId)}/status?status=${encodeURIComponent(status)}`,
+        { method: "PATCH", token },
+      ),
   };
 };
 

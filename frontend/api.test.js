@@ -117,4 +117,50 @@ describe("project API client", () => {
       }),
     );
   });
+
+  it("updates the editable fields for a saved ticket", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: 201 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+    const task = {
+      title: "Prepare interview notes",
+      description: "Collect role context and questions for the interview panel.",
+      status: "IN_PROGRESS",
+      projectId: 20,
+      priority: "HIGH",
+      category: "Interviews",
+      dueDate: "2026-08-18",
+      position: 2,
+    };
+
+    await client.updateTask({ token: "jwt-token", taskId: 201, task });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://api.test/api/tasks/201",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
+        body: JSON.stringify(task),
+      }),
+    );
+  });
+
+  it("moves a ticket to a new execution status", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: 201, status: "DONE" }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.updateTaskStatus({
+      token: "jwt-token",
+      taskId: 201,
+      status: "DONE",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://api.test/api/tasks/201/status?status=DONE",
+      expect.objectContaining({
+        method: "PATCH",
+        headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
+      }),
+    );
+    expect(fetchImpl.mock.calls[0][1]).not.toHaveProperty("body");
+  });
 });
