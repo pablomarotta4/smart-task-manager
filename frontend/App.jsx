@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ApiError, apiClient } from "./api";
 import BoardSection from "./components/BoardSection";
 import DraftEditor from "./components/DraftEditor";
+import MyWorkSection from "./components/MyWorkSection";
 import ProjectsSection from "./components/ProjectsSection";
 
 const SESSION_KEY = "smart-task-session";
@@ -36,6 +37,7 @@ export default function App({ client = apiClient }) {
   const [selectedTask, setSelectedTask] = useState(null);
   const [savingTask, setSavingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
+  const [workItems, setWorkItems] = useState([]);
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
 
@@ -229,6 +231,9 @@ export default function App({ client = apiClient }) {
       setProjectTasks((current) => current.map(
         (candidate) => candidate.id === task.id ? mergedTask : candidate,
       ));
+      setWorkItems((current) => current.map(
+        (candidate) => candidate.id === task.id ? { ...candidate, ...mergedTask } : candidate,
+      ));
       setSelectedTask(null);
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) {
@@ -239,6 +244,37 @@ export default function App({ client = apiClient }) {
       }
     } finally {
       setSavingTask(false);
+    }
+  };
+
+  const handleOpenMyWork = async () => {
+    setActiveView("my-work");
+    setProjectError("");
+    setProjectPhase("loading-projects");
+    setSelectedTask(null);
+    setWorkItems([]);
+
+    try {
+      const loadedProjects = await client.getProjects({ token: session.token });
+      setProjects(loadedProjects);
+      setProjectPhase("loading-tasks");
+      const projectBacklogs = await Promise.all(
+        loadedProjects.map(async (project) => {
+          const tasks = await client.getProjectTasks({
+            token: session.token,
+            projectId: project.id,
+          });
+          return tasks.map((task) => ({
+            ...task,
+            projectId: project.id,
+            projectName: project.name,
+          }));
+        }),
+      );
+      setWorkItems(projectBacklogs.flat());
+      setProjectPhase("idle");
+    } catch (requestError) {
+      handleProjectRequestError(requestError);
     }
   };
 
@@ -254,6 +290,7 @@ export default function App({ client = apiClient }) {
     setProjectTasks([]);
     setSelectedTask(null);
     setTaskError("");
+    setWorkItems([]);
     setProjectError("");
     setProjectPhase("idle");
     setError("");
@@ -375,6 +412,13 @@ export default function App({ client = apiClient }) {
             >
               Board
             </button>
+            <button
+              type="button"
+              aria-current={activeView === "my-work" ? "page" : undefined}
+              onClick={handleOpenMyWork}
+            >
+              My work
+            </button>
           </nav>
           <button className="text-action" type="button" onClick={handleLogout}>
             Log out <span aria-hidden="true">↗</span>
@@ -410,6 +454,22 @@ export default function App({ client = apiClient }) {
           onCloseTask={() => setSelectedTask(null)}
           onSaveTask={handleSaveTask}
           onRetry={() => handleOpenBoard(selectedProject?.id ?? null)}
+        />
+      ) : activeView === "my-work" ? (
+        <MyWorkSection
+          items={workItems}
+          phase={projectPhase}
+          error={projectError}
+          selectedTask={selectedTask}
+          savingTask={savingTask}
+          taskError={taskError}
+          onSelectTask={(task) => {
+            setTaskError("");
+            setSelectedTask(task);
+          }}
+          onCloseTask={() => setSelectedTask(null)}
+          onSaveTask={handleSaveTask}
+          onRetry={handleOpenMyWork}
         />
       ) : (
         <>

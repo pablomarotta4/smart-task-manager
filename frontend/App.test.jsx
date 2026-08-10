@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -127,6 +127,25 @@ const savedProjectTasks = [
     acceptanceCriteria: ["Every application has a visible current stage"],
     dependsOn: ["opportunity-intake"],
     aiSummary: "Make application progress and next actions visible.",
+  },
+];
+
+const savedOtherProjectTasks = [
+  {
+    id: 301,
+    projectId: 19,
+    title: "Repair the reservation handoff",
+    description: "Remove the blocker between tool availability and confirmed reservations.",
+    status: "BLOCKED",
+    position: 0,
+    priority: "URGENT",
+    category: "Reservations",
+    dueDate: "2026-08-11",
+    estimatedHours: 3,
+    planningClientId: "reservation-handoff",
+    acceptanceCriteria: ["A resident can reserve an available tool"],
+    dependsOn: ["tool-inventory"],
+    aiSummary: "Restore the critical reservation path.",
   },
 ];
 
@@ -488,5 +507,36 @@ describe("AI project workshop", () => {
     });
     expect(await screen.findByText("Capture qualified opportunity details"))
       .toBeInTheDocument();
+  });
+
+  it("loads every project backlog concurrently into My Work", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const resolvers = new Map();
+    client.getProjectTasks.mockImplementation(({ projectId }) =>
+      new Promise((resolve) => {
+        resolvers.set(projectId, resolve);
+      }));
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /my work/i }));
+
+    expect(await screen.findByRole("heading", { name: /my work/i })).toBeInTheDocument();
+    await waitFor(() => expect(client.getProjectTasks).toHaveBeenCalledTimes(2));
+    expect([...resolvers.keys()]).toEqual([20, 19]);
+
+    await act(async () => {
+      resolvers.get(20)(savedProjectTasks);
+      resolvers.get(19)(savedOtherProjectTasks);
+    });
+
+    expect(await screen.findByText("Repair the reservation handoff")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /blocked/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /due next/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Job Application Tracker - Initial Backlog").length)
+      .toBeGreaterThan(0);
+    expect(screen.getAllByText("Neighborhood Tool Lending Library - Phase 1").length)
+      .toBeGreaterThan(0);
   });
 });
