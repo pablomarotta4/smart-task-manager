@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { ApiError, apiClient } from "./api";
+import BoardSection from "./components/BoardSection";
 import DraftEditor from "./components/DraftEditor";
 import ProjectsSection from "./components/ProjectsSection";
 
@@ -32,6 +33,9 @@ export default function App({ client = apiClient }) {
   const [projectTasks, setProjectTasks] = useState([]);
   const [projectPhase, setProjectPhase] = useState("idle");
   const [projectError, setProjectError] = useState("");
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [savingTask, setSavingTask] = useState(false);
+  const [taskError, setTaskError] = useState("");
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
 
@@ -126,6 +130,7 @@ export default function App({ client = apiClient }) {
     setProjectPhase("loading-projects");
     setSelectedProject(null);
     setProjectTasks([]);
+    setSelectedTask(null);
 
     try {
       const projectsRequest = client.getProjects({ token: session.token });
@@ -149,6 +154,7 @@ export default function App({ client = apiClient }) {
   const handleSelectProject = async (project) => {
     setSelectedProject(project);
     setProjectTasks([]);
+    setSelectedTask(null);
     setProjectError("");
     setProjectPhase("loading-tasks");
     try {
@@ -171,6 +177,71 @@ export default function App({ client = apiClient }) {
     handleOpenProjects();
   };
 
+  const handleOpenBoard = async (projectId = selectedProject?.id ?? null) => {
+    setActiveView("board");
+    setProjectError("");
+    setProjectPhase("loading-projects");
+    setProjectTasks([]);
+    setSelectedTask(null);
+
+    try {
+      const loadedProjects = await client.getProjects({ token: session.token });
+      setProjects(loadedProjects);
+      const project = projectId === null
+        ? loadedProjects[0] ?? null
+        : loadedProjects.find((candidate) => candidate.id === projectId)
+          ?? loadedProjects[0]
+          ?? null;
+      setSelectedProject(project);
+
+      if (project) {
+        setProjectPhase("loading-tasks");
+        const tasks = await client.getProjectTasks({
+          token: session.token,
+          projectId: project.id,
+        });
+        setProjectTasks(tasks);
+      }
+      setProjectPhase("idle");
+    } catch (requestError) {
+      handleProjectRequestError(requestError);
+    }
+  };
+
+  const handleSaveTask = async (task, taskDraft) => {
+    setSavingTask(true);
+    setTaskError("");
+    try {
+      const updated = await client.updateTask({
+        token: session.token,
+        taskId: task.id,
+        task: taskDraft,
+      });
+      const mergedTask = {
+        ...task,
+        title: updated.title ?? taskDraft.title,
+        description: updated.description ?? taskDraft.description,
+        status: updated.status ?? taskDraft.status,
+        priority: updated.priority ?? taskDraft.priority,
+        dueDate: updated.dueDate === undefined ? taskDraft.dueDate : updated.dueDate,
+        position: updated.position ?? taskDraft.position,
+      };
+      setProjectTasks((current) => current.map(
+        (candidate) => candidate.id === task.id ? mergedTask : candidate,
+      ));
+      setSelectedTask(null);
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setTaskError(errorMessage(requestError));
+      }
+    } finally {
+      setSavingTask(false);
+    }
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setSession(null);
@@ -181,6 +252,8 @@ export default function App({ client = apiClient }) {
     setProjects([]);
     setSelectedProject(null);
     setProjectTasks([]);
+    setSelectedTask(null);
+    setTaskError("");
     setProjectError("");
     setProjectPhase("idle");
     setError("");
@@ -295,6 +368,13 @@ export default function App({ client = apiClient }) {
             >
               Projects
             </button>
+            <button
+              type="button"
+              aria-current={activeView === "board" ? "page" : undefined}
+              onClick={() => handleOpenBoard()}
+            >
+              Board
+            </button>
           </nav>
           <button className="text-action" type="button" onClick={handleLogout}>
             Log out <span aria-hidden="true">↗</span>
@@ -311,6 +391,25 @@ export default function App({ client = apiClient }) {
           error={projectError}
           onSelectProject={handleSelectProject}
           onRetry={handleRetryProjects}
+        />
+      ) : activeView === "board" ? (
+        <BoardSection
+          projects={projects}
+          selectedProject={selectedProject}
+          tasks={projectTasks}
+          phase={projectPhase}
+          error={projectError}
+          selectedTask={selectedTask}
+          savingTask={savingTask}
+          taskError={taskError}
+          onSelectProject={handleSelectProject}
+          onSelectTask={(task) => {
+            setTaskError("");
+            setSelectedTask(task);
+          }}
+          onCloseTask={() => setSelectedTask(null)}
+          onSaveTask={handleSaveTask}
+          onRetry={() => handleOpenBoard(selectedProject?.id ?? null)}
         />
       ) : (
         <>

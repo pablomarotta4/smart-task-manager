@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -98,6 +98,7 @@ const savedProjects = [
 const savedProjectTasks = [
   {
     id: 201,
+    projectId: 20,
     title: "Create opportunity intake",
     description: "Capture company, role, source, compensation, and the application link.",
     status: "TODO",
@@ -113,9 +114,10 @@ const savedProjectTasks = [
   },
   {
     id: 202,
+    projectId: 20,
     title: "Track application stages",
     description: "Show every application in its current stage with the next action.",
-    status: "TODO",
+    status: "IN_PROGRESS",
     position: 1,
     priority: "HIGH",
     category: "Workflow",
@@ -134,6 +136,10 @@ const createClient = () => ({
   confirmProject: vi.fn(),
   getProjects: vi.fn().mockResolvedValue(savedProjects),
   getProjectTasks: vi.fn().mockResolvedValue(savedProjectTasks),
+  updateTask: vi.fn().mockImplementation(({ taskId, task }) =>
+    Promise.resolve({ id: taskId, ...task })),
+  updateTaskStatus: vi.fn().mockImplementation(({ taskId, status }) =>
+    Promise.resolve({ id: taskId, status })),
 });
 
 const logIn = async (user, client) => {
@@ -437,6 +443,50 @@ describe("AI project workshop", () => {
       projectId: 42,
     });
     expect(await screen.findByRole("heading", { name: "Create opportunity intake" }))
+      .toBeInTheDocument();
+  });
+
+  it("opens a project board and saves ticket edits from the detail panel", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+
+    expect(await screen.findByRole("heading", { name: /project board/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^todo$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /in progress/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^blocked$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^done$/i })).toBeInTheDocument();
+    expect(client.getProjects).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getProjectTasks).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /open create opportunity intake/i }),
+    );
+
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    const title = within(panel).getByLabelText(/^title$/i);
+    await user.clear(title);
+    await user.type(title, "Capture qualified opportunity details");
+    await user.selectOptions(within(panel).getByLabelText(/^status$/i), "IN_PROGRESS");
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 201,
+      task: expect.objectContaining({
+        title: "Capture qualified opportunity details",
+        status: "IN_PROGRESS",
+        projectId: 20,
+      }),
+    });
+    expect(await screen.findByText("Capture qualified opportunity details"))
       .toBeInTheDocument();
   });
 });
