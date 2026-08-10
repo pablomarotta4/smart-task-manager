@@ -74,10 +74,66 @@ const generatedDraft = {
   model: "gemma3:4b",
 };
 
+const savedProjects = [
+  {
+    id: 20,
+    name: "Job Application Tracker - Initial Backlog",
+    objective: "Track opportunities from discovery through offer decisions.",
+    taskCount: 6,
+    ownerId: 18,
+    ownerUsername: "pablo-local",
+    createdAt: "2026-08-09T23:57:01.424559",
+  },
+  {
+    id: 19,
+    name: "Neighborhood Tool Lending Library - Phase 1",
+    objective: "Let neighbors reserve and return shared tools.",
+    taskCount: 6,
+    ownerId: 18,
+    ownerUsername: "pablo-local",
+    createdAt: "2026-08-09T23:44:04.410638",
+  },
+];
+
+const savedProjectTasks = [
+  {
+    id: 201,
+    title: "Create opportunity intake",
+    description: "Capture company, role, source, compensation, and the application link.",
+    status: "TODO",
+    position: 0,
+    priority: "HIGH",
+    category: "Opportunities",
+    dueDate: "2026-08-14",
+    estimatedHours: 4.5,
+    planningClientId: "opportunity-intake",
+    acceptanceCriteria: ["A saved opportunity includes company, role, and source"],
+    dependsOn: [],
+    aiSummary: "Build the structured intake for every potential role.",
+  },
+  {
+    id: 202,
+    title: "Track application stages",
+    description: "Show every application in its current stage with the next action.",
+    status: "TODO",
+    position: 1,
+    priority: "HIGH",
+    category: "Workflow",
+    dueDate: "2026-08-18",
+    estimatedHours: 6,
+    planningClientId: "application-stages",
+    acceptanceCriteria: ["Every application has a visible current stage"],
+    dependsOn: ["opportunity-intake"],
+    aiSummary: "Make application progress and next actions visible.",
+  },
+];
+
 const createClient = () => ({
   login: vi.fn().mockResolvedValue(authenticatedUser),
   generateProject: vi.fn().mockResolvedValue(generatedDraft),
   confirmProject: vi.fn(),
+  getProjects: vi.fn().mockResolvedValue(savedProjects),
+  getProjectTasks: vi.fn().mockResolvedValue(savedProjectTasks),
 });
 
 const logIn = async (user, client) => {
@@ -242,5 +298,95 @@ describe("AI project workshop", () => {
     expect(await screen.findByRole("heading", { name: /project created/i })).toBeInTheDocument();
     expect(screen.getByText(/project #42/i)).toBeInTheDocument();
     expect(screen.getByText(/3 tickets/i)).toBeInTheDocument();
+  });
+
+  it("opens the projects section and loads one project's ticket details", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+
+    expect(await screen.findByRole("heading", { name: /your projects/i })).toBeInTheDocument();
+    expect(client.getProjects).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(screen.getAllByText(/6 tickets/i)).toHaveLength(2);
+
+    await user.click(
+      screen.getByRole("button", { name: /job application tracker - initial backlog/i }),
+    );
+
+    expect(client.getProjectTasks).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Create opportunity intake" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("4.5 hours")).toBeInTheDocument();
+    expect(
+      screen.getByText("A saved opportunity includes company, role, and source"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("opportunity-intake")).toBeInTheDocument();
+  });
+
+  it("shows an empty project index", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue([]);
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+
+    expect(await screen.findByText(/no projects yet/i)).toBeInTheDocument();
+  });
+
+  it("keeps project navigation available when the index request fails", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockRejectedValue(
+      new ApiError("Could not load projects", { status: 500 }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load projects");
+    expect(screen.getByRole("button", { name: /^workshop$/i })).toBeInTheDocument();
+  });
+
+  it("opens a newly confirmed project from the creation receipt", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmProject.mockResolvedValue({
+      runId: "run-1",
+      projectId: 42,
+      projectName: "Kitchen Redesign Project",
+      taskIds: [101, 102, 103],
+      alreadyConfirmed: false,
+    });
+    client.getProjects.mockResolvedValue([
+      {
+        ...savedProjects[0],
+        id: 42,
+        name: "Kitchen Redesign Project",
+        taskCount: 3,
+      },
+    ]);
+    render(<App client={client} />);
+    await generateDraft(user, client);
+    await user.click(screen.getByRole("button", { name: /confirm and create project/i }));
+
+    await user.click(await screen.findByRole("button", { name: /view project/i }));
+
+    expect(client.getProjects).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getProjectTasks).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 42,
+    });
+    expect(await screen.findByRole("heading", { name: "Create opportunity intake" }))
+      .toBeInTheDocument();
   });
 });

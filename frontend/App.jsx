@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { ApiError, apiClient } from "./api";
 import DraftEditor from "./components/DraftEditor";
+import ProjectsSection from "./components/ProjectsSection";
 
 const SESSION_KEY = "smart-task-session";
 
@@ -25,6 +26,12 @@ export default function App({ client = apiClient }) {
   const [draftResponse, setDraftResponse] = useState(null);
   const [editableDraft, setEditableDraft] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
+  const [activeView, setActiveView] = useState("workshop");
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [projectTasks, setProjectTasks] = useState([]);
+  const [projectPhase, setProjectPhase] = useState("idle");
+  const [projectError, setProjectError] = useState("");
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
 
@@ -95,6 +102,7 @@ export default function App({ client = apiClient }) {
   };
 
   const handleStartOver = () => {
+    setActiveView("workshop");
     setPrompt("");
     setDraftResponse(null);
     setEditableDraft(null);
@@ -103,12 +111,78 @@ export default function App({ client = apiClient }) {
     setPhase("idle");
   };
 
+  const handleProjectRequestError = (requestError) => {
+    if (requestError instanceof ApiError && requestError.status === 401) {
+      sessionStorage.removeItem(SESSION_KEY);
+      setSession(null);
+    }
+    setProjectError(errorMessage(requestError));
+    setProjectPhase("idle");
+  };
+
+  const handleOpenProjects = async (projectId = null) => {
+    setActiveView("projects");
+    setProjectError("");
+    setProjectPhase("loading-projects");
+    setSelectedProject(null);
+    setProjectTasks([]);
+
+    try {
+      const projectsRequest = client.getProjects({ token: session.token });
+      const tasksRequest = projectId === null
+        ? Promise.resolve(null)
+        : client.getProjectTasks({ token: session.token, projectId });
+      const [loadedProjects, loadedTasks] = await Promise.all([projectsRequest, tasksRequest]);
+      setProjects(loadedProjects);
+
+      if (projectId !== null) {
+        const project = loadedProjects.find((candidate) => candidate.id === projectId) ?? null;
+        setSelectedProject(project);
+        setProjectTasks(project ? loadedTasks : []);
+      }
+      setProjectPhase("idle");
+    } catch (requestError) {
+      handleProjectRequestError(requestError);
+    }
+  };
+
+  const handleSelectProject = async (project) => {
+    setSelectedProject(project);
+    setProjectTasks([]);
+    setProjectError("");
+    setProjectPhase("loading-tasks");
+    try {
+      const tasks = await client.getProjectTasks({
+        token: session.token,
+        projectId: project.id,
+      });
+      setProjectTasks(tasks);
+      setProjectPhase("idle");
+    } catch (requestError) {
+      handleProjectRequestError(requestError);
+    }
+  };
+
+  const handleRetryProjects = () => {
+    if (selectedProject) {
+      handleSelectProject(selectedProject);
+      return;
+    }
+    handleOpenProjects();
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setSession(null);
     setDraftResponse(null);
     setEditableDraft(null);
     setConfirmation(null);
+    setActiveView("workshop");
+    setProjects([]);
+    setSelectedProject(null);
+    setProjectTasks([]);
+    setProjectError("");
+    setProjectPhase("idle");
     setError("");
     setPhase("idle");
   };
@@ -205,11 +279,41 @@ export default function App({ client = apiClient }) {
             <p className="user-name">{session.user.fullName ?? session.user.username}</p>
           </div>
         </div>
-        <button className="text-action" type="button" onClick={handleLogout}>
-          Log out <span aria-hidden="true">↗</span>
-        </button>
+        <div className="topbar-actions">
+          <nav className="primary-navigation" aria-label="Primary navigation">
+            <button
+              type="button"
+              aria-current={activeView === "workshop" ? "page" : undefined}
+              onClick={() => setActiveView("workshop")}
+            >
+              Workshop
+            </button>
+            <button
+              type="button"
+              aria-current={activeView === "projects" ? "page" : undefined}
+              onClick={() => handleOpenProjects()}
+            >
+              Projects
+            </button>
+          </nav>
+          <button className="text-action" type="button" onClick={handleLogout}>
+            Log out <span aria-hidden="true">↗</span>
+          </button>
+        </div>
       </header>
 
+      {activeView === "projects" ? (
+        <ProjectsSection
+          projects={projects}
+          selectedProject={selectedProject}
+          tasks={projectTasks}
+          phase={projectPhase}
+          error={projectError}
+          onSelectProject={handleSelectProject}
+          onRetry={handleRetryProjects}
+        />
+      ) : (
+        <>
       <section className="prompt-stage" aria-labelledby="prompt-title">
         <div className="prompt-heading">
           <p className="section-index">01 / Brief</p>
@@ -290,11 +394,22 @@ export default function App({ client = apiClient }) {
           <p className="muted-copy">
             {confirmation.taskIds.length} tickets are now ready in your task board.
           </p>
-          <button className="primary-action" type="button" onClick={handleStartOver}>
-            <span>Plan another project</span><span aria-hidden="true">↗</span>
-          </button>
+          <div className="confirmation-actions">
+            <button
+              className="primary-action"
+              type="button"
+              onClick={() => handleOpenProjects(confirmation.projectId)}
+            >
+              <span>View project</span><span aria-hidden="true">↗</span>
+            </button>
+            <button className="text-action" type="button" onClick={handleStartOver}>
+              Plan another project
+            </button>
+          </div>
         </section>
       ) : null}
+        </>
+      )}
     </main>
   );
 }
