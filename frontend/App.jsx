@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { ApiError, apiClient } from "./api";
+import AccountSection from "./components/AccountSection";
 import BoardSection from "./components/BoardSection";
 import DraftEditor from "./components/DraftEditor";
 import MyWorkSection from "./components/MyWorkSection";
@@ -278,6 +279,20 @@ export default function App({ client = apiClient }) {
     }
   };
 
+  const handlePlanFollowUp = (project) => {
+    setPrompt(
+      `Create a follow-up project plan for "${project.name}". `
+      + `Use this existing objective as context: ${project.objective || "No objective recorded"}. `
+      + "Focus on the next useful phase and produce a separate, editable backlog.",
+    );
+    setDraftResponse(null);
+    setEditableDraft(null);
+    setConfirmation(null);
+    setError("");
+    setPhase("idle");
+    setActiveView("workshop");
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setSession(null);
@@ -419,6 +434,13 @@ export default function App({ client = apiClient }) {
             >
               My work
             </button>
+            <button
+              type="button"
+              aria-current={activeView === "account" ? "page" : undefined}
+              onClick={() => setActiveView("account")}
+            >
+              Account
+            </button>
           </nav>
           <button className="text-action" type="button" onClick={handleLogout}>
             Log out <span aria-hidden="true">↗</span>
@@ -453,6 +475,7 @@ export default function App({ client = apiClient }) {
           }}
           onCloseTask={() => setSelectedTask(null)}
           onSaveTask={handleSaveTask}
+          onPlanFollowUp={handlePlanFollowUp}
           onRetry={() => handleOpenBoard(selectedProject?.id ?? null)}
         />
       ) : activeView === "my-work" ? (
@@ -471,6 +494,8 @@ export default function App({ client = apiClient }) {
           onSaveTask={handleSaveTask}
           onRetry={handleOpenMyWork}
         />
+      ) : activeView === "account" ? (
+        <AccountSection user={session.user} onLogout={handleLogout} />
       ) : (
         <>
       <section className="prompt-stage" aria-labelledby="prompt-title">

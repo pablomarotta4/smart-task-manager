@@ -539,4 +539,44 @@ describe("AI project workshop", () => {
     expect(screen.getAllByText("Neighborhood Tool Lending Library - Phase 1").length)
       .toBeGreaterThan(0);
   });
+
+  it("opens an honest AI follow-up brief from the project desk", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /plan next phase/i }));
+
+    expect(screen.getByText(/does not modify this project/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /open follow-up brief/i }));
+
+    expect(screen.getByRole("button", { name: /^workshop$/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByLabelText(/describe your project/i).value).toContain(
+      "Job Application Tracker - Initial Backlog",
+    );
+  });
+
+  it("shows the authenticated account and signs out from its dedicated view", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+
+    const accountTitle = await screen.findByRole("heading", { name: /account/i });
+    const account = accountTitle.closest("section");
+    expect(within(account).getByText("Pablo Local Tester")).toBeInTheDocument();
+    expect(within(account).getByText("pablo-local")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+
+    expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
+      .toBeInTheDocument();
+  });
 });

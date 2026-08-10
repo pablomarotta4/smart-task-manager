@@ -1,4 +1,5 @@
 import TicketDetailPanel from "./TicketDetailPanel";
+import ProjectDesk from "./ProjectDesk";
 
 const LANES = [
   { status: "TODO", label: "Todo", marker: "01" },
@@ -29,6 +30,7 @@ export default function BoardSection({
   onSelectTask,
   onCloseTask,
   onSaveTask,
+  onPlanFollowUp,
   onRetry,
 }) {
   const loading = phase === "loading-projects" || phase === "loading-tasks";
@@ -96,6 +98,12 @@ export default function BoardSection({
               </div>
             </div>
           </section>
+
+          <ProjectDesk
+            project={selectedProject}
+            taskCount={activeTasks.length}
+            onPlanFollowUp={onPlanFollowUp}
+          />
 
           <div className="board-lanes" aria-label={`${selectedProject.name} ticket board`}>
             {LANES.map((lane) => {
