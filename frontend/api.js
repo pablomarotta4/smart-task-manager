@@ -65,11 +65,26 @@ export const createApiClient = ({
         body: { draft },
       }),
     getProjects: ({ token }) => request("/api/projects", { method: "GET", token }),
+    createProject: ({ token, project }) =>
+      request("/api/projects", { method: "POST", token, body: project }),
+    updateProject: ({ token, projectId, project }) =>
+      request(`/api/projects/${encodeURIComponent(projectId)}`, {
+        method: "PUT",
+        token,
+        body: project,
+      }),
+    deleteProject: ({ token, projectId }) =>
+      request(`/api/projects/${encodeURIComponent(projectId)}`, {
+        method: "DELETE",
+        token,
+      }),
     getProjectTasks: ({ token, projectId }) =>
       request(`/api/tasks/project/${encodeURIComponent(projectId)}`, {
         method: "GET",
         token,
       }),
+    createTask: ({ token, task }) =>
+      request("/api/tasks/newtask", { method: "POST", token, body: task }),
     updateTask: ({ token, taskId, task }) =>
       request(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: "PUT",
@@ -81,6 +96,11 @@ export const createApiClient = ({
         `/api/tasks/${encodeURIComponent(taskId)}/status?status=${encodeURIComponent(status)}`,
         { method: "PATCH", token },
       ),
+    deleteTask: ({ token, taskId }) =>
+      request(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: "DELETE",
+        token,
+      }),
   };
 };
 

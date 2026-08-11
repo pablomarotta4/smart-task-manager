@@ -103,6 +103,49 @@ describe("project API client", () => {
     expect(fetchImpl.mock.calls[0][1]).not.toHaveProperty("body");
   });
 
+  it("creates and updates a project without an AI run", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 21 }, 201))
+      .mockResolvedValueOnce(jsonResponse({ id: 21 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+    const project = { name: "Release checklist", objective: "Ship with confidence" };
+
+    await client.createProject({ token: "jwt-token", project });
+    await client.updateProject({ token: "jwt-token", projectId: 21, project });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/projects",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(project),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/projects/21",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify(project),
+      }),
+    );
+  });
+
+  it("deletes a project with bearer authentication", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.deleteProject({ token: "jwt-token", projectId: "release/21" });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://api.test/api/projects/release%2F21",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
+      }),
+    );
+  });
+
   it("loads the selected project's tickets", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse([{ id: 101 }]));
     const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
@@ -141,6 +184,37 @@ describe("project API client", () => {
         headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
         body: JSON.stringify(task),
       }),
+    );
+  });
+
+  it("creates and deletes a manual ticket", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 202 }, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+    const task = {
+      title: "Prepare release notes",
+      description: "Summarize the user-visible changes for this release.",
+      status: "TODO",
+      projectId: 21,
+      priority: "MEDIUM",
+      category: "Release",
+      dueDate: null,
+      position: 0,
+    };
+
+    await client.createTask({ token: "jwt-token", task });
+    await client.deleteTask({ token: "jwt-token", taskId: 202 });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/tasks/newtask",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(task) }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/tasks/202",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 
