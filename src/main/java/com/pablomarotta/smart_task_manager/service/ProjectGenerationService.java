@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.client.AIPlanningClient;
 import com.pablomarotta.smart_task_manager.client.AIPlanningUnavailableException;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningResponse;
+import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningContext;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationDraftResponse;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
@@ -22,17 +23,20 @@ public class ProjectGenerationService {
     private final ProjectGenerationRunRepository runRepository;
     private final UserRepository userRepository;
     private final AIPlanningClient aiPlanningClient;
+    private final ProjectPlanningContextService contextService;
     private final ObjectMapper objectMapper;
 
     public ProjectGenerationService(
             ProjectGenerationRunRepository runRepository,
             UserRepository userRepository,
             AIPlanningClient aiPlanningClient,
+            ProjectPlanningContextService contextService,
             ObjectMapper objectMapper
     ) {
         this.runRepository = runRepository;
         this.userRepository = userRepository;
         this.aiPlanningClient = aiPlanningClient;
+        this.contextService = contextService;
         this.objectMapper = objectMapper;
     }
 
@@ -48,8 +52,47 @@ public class ProjectGenerationService {
                 .build();
         runRepository.save(run);
 
+        return generate(run, null);
+    }
+
+    public ProjectGenerationDraftResponse generateDraftForTask(
+            String username,
+            Long projectId,
+            Long taskId,
+            String prompt
+    ) {
+        User requester = userRepository.findByUsername(username)
+                .orElseThrow(() -> new UserNotFoundException(
+                        "User not found with username: " + username
+                ));
+        ProjectPlanningContextService.CapturedContext captured = contextService.capture(
+                projectId,
+                taskId,
+                username
+        );
+        ProjectGenerationRun run = ProjectGenerationRun.builder()
+                .id(UUID.randomUUID())
+                .requestedBy(requester)
+                .prompt(prompt.trim())
+                .mode(ProjectGenerationMode.EXISTING_TASK)
+                .status(ProjectGenerationStatus.PROCESSING)
+                .project(captured.project())
+                .targetTask(captured.targetTask())
+                .contextHash(captured.contextHash())
+                .build();
+        runRepository.save(run);
+
+        return generate(run, captured.context());
+    }
+
+    private ProjectGenerationDraftResponse generate(
+            ProjectGenerationRun run,
+            AIPlanningContext context
+    ) {
         try {
-            AIPlanningResponse response = aiPlanningClient.generatePlan(run.getId(), run.getPrompt());
+            AIPlanningResponse response = context == null
+                    ? aiPlanningClient.generatePlan(run.getId(), run.getPrompt())
+                    : aiPlanningClient.generatePlan(run.getId(), run.getPrompt(), context);
             run.setDraftJson(writeJson(response.draft()));
             run.setQualityJson(writeJson(response.quality()));
             run.setRevisionCount(response.revisionCount());

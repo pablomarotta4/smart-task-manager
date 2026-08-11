@@ -9,6 +9,10 @@ import com.pablomarotta.smart_task_manager.dto.planning.PlanQualityMetrics;
 import com.pablomarotta.smart_task_manager.dto.planning.PlanQualityReport;
 import com.pablomarotta.smart_task_manager.dto.planning.PlanningTicketDraft;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationDraftResponse;
+import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningContext;
+import com.pablomarotta.smart_task_manager.dto.planning.PlanningProjectSnapshot;
+import com.pablomarotta.smart_task_manager.dto.planning.PlanningTaskSnapshot;
+import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectPlanDraft;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
@@ -31,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +48,8 @@ class ProjectGenerationServiceTest {
     private UserRepository userRepository;
     @Mock
     private AIPlanningClient aiPlanningClient;
+    @Mock
+    private ProjectPlanningContextService contextService;
 
     private ProjectGenerationService service;
     private User owner;
@@ -53,6 +60,7 @@ class ProjectGenerationServiceTest {
                 runRepository,
                 userRepository,
                 aiPlanningClient,
+                contextService,
                 new ObjectMapper().findAndRegisterModules()
         );
         owner = User.builder().id(7L).username("alice").email("alice@example.com")
@@ -102,6 +110,51 @@ class ProjectGenerationServiceTest {
         verify(runRepository, org.mockito.Mockito.times(2)).save(runCaptor.capture());
         assertEquals(ProjectGenerationStatus.FAILED, runCaptor.getValue().getStatus());
         assertEquals("AI_PLANNING_UNAVAILABLE", runCaptor.getValue().getErrorCode());
+    }
+
+    @Test
+    void generateExistingTaskDraftPersistsAuthorizedTargetAndStructuredContext() {
+        Project project = Project.builder().id(20L).name("Budget App").owner(owner).build();
+        com.pablomarotta.smart_task_manager.model.Task target =
+                com.pablomarotta.smart_task_manager.model.Task.builder()
+                        .id(201L)
+                        .project(project)
+                        .title("Import bank transactions")
+                        .build();
+        AIPlanningContext context = new AIPlanningContext(
+                ProjectGenerationMode.EXISTING_TASK,
+                new PlanningProjectSnapshot(20L, "Budget App", "Manage household spending"),
+                201L,
+                List.<PlanningTaskSnapshot>of()
+        );
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(owner));
+        when(contextService.capture(20L, 201L, "alice")).thenReturn(
+                new ProjectPlanningContextService.CapturedContext(
+                        project,
+                        target,
+                        context,
+                        "a".repeat(64)
+                )
+        );
+        when(aiPlanningClient.generatePlan(any(UUID.class), any(String.class), eq(context)))
+                .thenAnswer(invocation -> PlanningTestFixtures.response(invocation.getArgument(0)));
+
+        ProjectGenerationDraftResponse result = service.generateDraftForTask(
+                "alice",
+                20L,
+                201L,
+                "Break this ticket into implementation steps"
+        );
+
+        assertEquals(ProjectGenerationStatus.DRAFT_READY, result.status());
+        ArgumentCaptor<ProjectGenerationRun> runCaptor = ArgumentCaptor.forClass(ProjectGenerationRun.class);
+        verify(runRepository, org.mockito.Mockito.times(2)).save(runCaptor.capture());
+        ProjectGenerationRun stored = runCaptor.getValue();
+        assertEquals(ProjectGenerationMode.EXISTING_TASK, stored.getMode());
+        assertEquals(project, stored.getProject());
+        assertEquals(target, stored.getTargetTask());
+        assertEquals("a".repeat(64), stored.getContextHash());
+        verify(aiPlanningClient).generatePlan(stored.getId(), stored.getPrompt(), context);
     }
 
 }

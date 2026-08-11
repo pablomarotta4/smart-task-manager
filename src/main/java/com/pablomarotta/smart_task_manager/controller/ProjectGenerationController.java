@@ -42,6 +42,22 @@ public class ProjectGenerationController {
         return generationService.generateDraft(authentication.getName(), request.prompt());
     }
 
+    @PostMapping("/projects/{projectId}/tasks/{taskId}")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ProjectGenerationDraftResponse generateForExistingTask(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @Valid @RequestBody GenerateProjectRequest request,
+            Authentication authentication
+    ) {
+        return generationService.generateDraftForTask(
+                authentication.getName(),
+                projectId,
+                taskId,
+                request.prompt()
+        );
+    }
+
     @PostMapping("/{runId}/confirm")
     public ResponseEntity<ProjectGenerationConfirmationResponse> confirm(
             @PathVariable UUID runId,

@@ -99,6 +99,42 @@ class ProjectGenerationControllerTest {
     }
 
     @Test
+    void generateForExistingTaskUsesAuthenticatedProjectScopedTarget() throws Exception {
+        var aiResponse = PlanningTestFixtures.response(runId);
+        when(generationService.generateDraftForTask(
+                eq("alice"), eq(20L), eq(201L), any(String.class)
+        )).thenReturn(new ProjectGenerationDraftResponse(
+                runId,
+                ProjectGenerationStatus.DRAFT_READY,
+                aiResponse.draft(),
+                aiResponse.quality(),
+                aiResponse.revisionCount(),
+                aiResponse.model()
+        ));
+
+        mockMvc.perform(post(
+                        "/api/project-generation-runs/projects/{projectId}/tasks/{taskId}",
+                        20L,
+                        201L
+                )
+                        .principal(new UsernamePasswordAuthenticationToken("alice", "ignored"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"prompt":"Break this ticket into implementation steps"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.runId").value(runId.toString()))
+                .andExpect(jsonPath("$.status").value("DRAFT_READY"));
+
+        verify(generationService).generateDraftForTask(
+                "alice",
+                20L,
+                201L,
+                "Break this ticket into implementation steps"
+        );
+    }
+
+    @Test
     void confirmAcceptsEditedDraftAndReturnsCreatedProjectAndTickets() throws Exception {
         when(confirmationService.confirm(eq(runId), eq("alice"), any())).thenReturn(
                 new ProjectGenerationConfirmationResponse(
