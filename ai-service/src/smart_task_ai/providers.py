@@ -46,6 +46,10 @@ class ReadinessProbe(Protocol):
     async def check_readiness(self) -> ProviderReadiness: ...
 
 
+class ModelMetricsReader(Protocol):
+    def metrics_for_run(self, run_id: UUID) -> list[ModelCallMetric]: ...
+
+
 class PlanningModel(Protocol):
     """Provider-neutral boundary used by the planning graph."""
 

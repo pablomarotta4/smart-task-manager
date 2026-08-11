@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from uuid import UUID
 
-from smart_task_ai.contracts import Priority, ProjectDraft, TicketDraft
+from smart_task_ai.contracts import (
+    PlanningContext,
+    PlanningProjectContext,
+    PlanningTaskContext,
+    Priority,
+    ProjectDraft,
+    TicketDraft,
+)
 from smart_task_ai.evaluation import EvaluationCase, ExpectedConcept, evaluate_cases
 from smart_task_ai.planner import ProjectPlanner
-from smart_task_ai.providers import ModelCallMetadata
+from smart_task_ai.providers import ModelCallMetadata, ModelCallMetric
 
 
 def ticket(client_id: str, title: str, *, rich: bool = True) -> TicketDraft:
@@ -70,6 +78,10 @@ class ScriptedModel:
     responses: Sequence[ProjectDraft]
     model_name: str = "behavior-fixture"
     call_count: int = 0
+    metadata_calls: list[ModelCallMetadata | None] = field(
+        default_factory=lambda: list[ModelCallMetadata | None]()
+    )
+    user_prompts: list[str] = field(default_factory=lambda: list[str]())
 
     async def generate(
         self,
@@ -78,10 +90,32 @@ class ScriptedModel:
         user_prompt: str,
         metadata: ModelCallMetadata | None = None,
     ) -> ProjectDraft:
-        del system_prompt, user_prompt, metadata
+        del system_prompt
+        self.metadata_calls.append(metadata)
+        self.user_prompts.append(user_prompt)
         index = min(self.call_count, len(self.responses) - 1)
         self.call_count += 1
         return self.responses[index]
+
+
+@dataclass
+class FixedMetrics:
+    calls_per_run: int = 2
+
+    def metrics_for_run(self, run_id: UUID) -> list[ModelCallMetric]:
+        return [
+            ModelCallMetric(
+                run_id=run_id,
+                model="behavior-fixture",
+                phase="brief_analysis" if attempt == 1 else "generation",
+                attempt=1,
+                prompt_tokens=100 * attempt,
+                output_tokens=20 * attempt,
+                duration_ms=250 * attempt,
+                outcome="success",
+            )
+            for attempt in range(1, self.calls_per_run + 1)
+        ]
 
 
 async def test_behavior_suite_measures_sufficiency_repetition_and_revision() -> None:
@@ -171,3 +205,82 @@ async def test_concept_matching_tolerates_punctuation_and_intervening_words() ->
 
     assert summary.passed_cases == 1
     assert summary.results[0].missing_concepts == []
+
+
+async def test_evaluation_reuses_runtime_morphology_for_required_concepts() -> None:
+    covered = good_draft("Tool Library")
+    covered.tickets[0].title = "Record a returned tool"
+    covered.tickets[
+        0
+    ].description = (
+        "Record that a resident returned one shared tool and make it available for reservations."
+    )
+    cases = [
+        EvaluationCase(
+            id="tool-return",
+            prompt="Track tool returns",
+            required_concepts=[ExpectedConcept(name="return workflow", any_of=["return tools"])],
+        )
+    ]
+
+    summary = await evaluate_cases(cases, ProjectPlanner(ScriptedModel([covered])))
+
+    assert summary.results[0].missing_concepts == []
+
+
+async def test_evaluation_reports_provider_call_token_and_latency_metrics() -> None:
+    metrics = FixedMetrics()
+
+    summary = await evaluate_cases(
+        [EvaluationCase(id="crm", prompt="CRM")],
+        ProjectPlanner(ScriptedModel([good_draft("CRM")])),
+        metrics_reader=metrics,
+    )
+
+    result = summary.results[0]
+    assert result.call_count == 2
+    assert result.prompt_tokens == 300
+    assert result.output_tokens == 60
+    assert result.provider_duration_ms == 750
+    assert summary.total_calls == 2
+    assert summary.total_prompt_tokens == 300
+    assert summary.total_output_tokens == 60
+    assert summary.total_provider_duration_ms == 750
+
+
+async def test_evaluation_passes_existing_ticket_context_to_the_planner() -> None:
+    context = PlanningContext(
+        mode="EXISTING_TASK",
+        project=PlanningProjectContext(id=1, name="Launch Workspace"),
+        selected_task_id=10,
+        tasks=[
+            PlanningTaskContext(
+                id=10,
+                title="Deliver the primary user workflow",
+                status="TODO",
+            ),
+            PlanningTaskContext(
+                id=11,
+                title="Measure first-release outcomes",
+                status="IN_PROGRESS",
+            ),
+        ],
+    )
+    model = ScriptedModel([good_draft("Launch Workspace")])
+
+    summary = await evaluate_cases(
+        [
+            EvaluationCase(
+                id="existing-work",
+                prompt="Plan this",
+                context=context,
+                backlog_size=200,
+            )
+        ],
+        ProjectPlanner(model),
+    )
+
+    assert summary.results[0].passed is False
+    assert "duplicates_existing_work" in summary.results[0].issue_codes
+    assert model.call_count == 2
+    assert '"omitted_task_count":' in model.user_prompts[0]

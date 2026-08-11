@@ -43,8 +43,14 @@ The deterministic test suite measures whether responses are enough and whether t
 - maximum pairwise title similarity;
 - actionable-description coverage;
 - acceptance-criteria coverage;
-- extracted-capability and prompt-specific required-concept coverage;
-- issue codes and whether one revision was required.
+- extracted-capability and prompt-specific required-concept coverage using the same morphology as
+  runtime quality checks;
+- issue codes and whether one revision was required;
+- provider attempt count, prompt/output tokens, and provider duration when metrics are available.
+
+The checked-in 30-case suite covers three-character briefs, explicit workflows, existing-ticket
+planning, 120- and 200-ticket synthetic backlogs, irrelevant context, and prompt-injection text.
+Live regression runs force temperature `0` and use seed `42` unless a seed is configured.
 
 Run the same evaluation cases against the configured live Ollama model:
 

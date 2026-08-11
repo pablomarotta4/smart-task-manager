@@ -31,10 +31,17 @@ async def run() -> int:
         base_url=settings.ollama_base_url,
         model=settings.ollama_model,
         timeout_seconds=settings.ollama_timeout_seconds,
-        temperature=settings.ollama_temperature,
+        temperature=0,
+        context_tokens=settings.ollama_context_tokens,
+        output_tokens=settings.ollama_output_tokens,
+        seed=settings.ollama_seed if settings.ollama_seed is not None else 42,
     )
-    planner = ProjectPlanner(model, brief_analyzer=model)
-    summary = await evaluate_cases(cases, planner)
+    planner = ProjectPlanner(
+        model,
+        brief_analyzer=model,
+        max_input_tokens=settings.planning_input_tokens,
+    )
+    summary = await evaluate_cases(cases, planner, metrics_reader=model)
     print(summary.model_dump_json(indent=2))
     return 0 if summary.passed_cases == summary.total_cases else 1
 
