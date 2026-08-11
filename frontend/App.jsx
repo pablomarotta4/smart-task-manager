@@ -129,6 +129,7 @@ export default function App({ client = apiClient }) {
       }
       setError(errorMessage(requestError));
       setPhase("idle");
+      void loadRecentRuns();
     }
   };
 

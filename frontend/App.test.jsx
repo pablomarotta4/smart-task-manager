@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -387,6 +387,7 @@ describe("AI project workshop", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("AI planning service is unavailable");
     expect(promptField).toHaveValue(prompt);
+    await waitFor(() => expect(client.getGenerationRuns).toHaveBeenCalledTimes(2));
   });
 
   it("restores a persisted draft after an authenticated page refresh", async () => {
