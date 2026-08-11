@@ -152,6 +152,24 @@ class SecurityTest {
         verify(userService, never()).deleteUser(org.mockito.ArgumentMatchers.anyString());
     }
 
+    @Test
+    void adminCannotUpdateOrDeactivateAnotherAccount() throws Exception {
+        authenticate("admin-token", "admin", "ROLE_ADMIN");
+        UserRequest request = validUserRequest("bob");
+
+        mockMvc.perform(put("/api/users/bob")
+                        .header("Authorization", "Bearer admin-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/users/bob")
+                        .header("Authorization", "Bearer admin-token"))
+                .andExpect(status().isForbidden());
+
+        verify(userService, never()).updateUser(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+        verify(userService, never()).deleteUser(org.mockito.ArgumentMatchers.anyString());
+    }
+
     private void authenticate(String token, String username, String authority) {
         UserDetails userDetails = User.withUsername(username)
                 .password("password")

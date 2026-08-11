@@ -47,7 +47,7 @@ public class UserController {
 
     @PutMapping("/{username}")
     @ResponseStatus(HttpStatus.OK)
-    @PreAuthorize("#username == authentication.name or hasRole('ADMIN')")
+    @PreAuthorize("#username == authentication.name")
     public UserResponse updateUser(@PathVariable String username, @Valid @RequestBody UserRequest userRequest) {
         log.info("Updating user with username: {}", username);
         return userService.updateUser(username, userRequest);
@@ -55,7 +55,7 @@ public class UserController {
 
     @DeleteMapping("/{username}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("#username == authentication.name or hasRole('ADMIN')")
+    @PreAuthorize("#username == authentication.name")
     public void deleteUser(@PathVariable String username) {
         log.info("Deactivating user with username: {}", username);
         userService.deleteUser(username);
