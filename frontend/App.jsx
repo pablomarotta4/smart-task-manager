@@ -38,7 +38,7 @@ export default function App({ client = apiClient }) {
   const [projectMutationPhase, setProjectMutationPhase] = useState("idle");
   const [projectMutationError, setProjectMutationError] = useState("");
   const [selectedTask, setSelectedTask] = useState(null);
-  const [savingTask, setSavingTask] = useState(false);
+  const [taskMutationPhase, setTaskMutationPhase] = useState("idle");
   const [taskError, setTaskError] = useState("");
   const [workItems, setWorkItems] = useState([]);
   const [phase, setPhase] = useState("idle");
@@ -291,7 +291,7 @@ export default function App({ client = apiClient }) {
   };
 
   const handleSaveTask = async (task, taskDraft) => {
-    setSavingTask(true);
+    setTaskMutationPhase("updating");
     setTaskError("");
     try {
       const updated = await client.updateTask({
@@ -323,7 +323,66 @@ export default function App({ client = apiClient }) {
         setTaskError(errorMessage(requestError));
       }
     } finally {
-      setSavingTask(false);
+      setTaskMutationPhase("idle");
+    }
+  };
+
+  const updateProjectTaskCount = (projectId, delta) => {
+    setProjects((current) => current.map((project) => project.id === projectId
+      ? { ...project, taskCount: Math.max(0, (project.taskCount ?? 0) + delta) }
+      : project));
+    setSelectedProject((current) => current?.id === projectId
+      ? { ...current, taskCount: Math.max(0, (current.taskCount ?? 0) + delta) }
+      : current);
+  };
+
+  const handleCreateTask = async (task) => {
+    setTaskError("");
+    setTaskMutationPhase("creating");
+    try {
+      const created = await client.createTask({ token: session.token, task });
+      const normalizedTask = {
+        acceptanceCriteria: [],
+        dependsOn: [],
+        ...task,
+        ...created,
+      };
+      setProjectTasks((current) => [...current, normalizedTask]);
+      updateProjectTaskCount(task.projectId, 1);
+      return true;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setTaskError(errorMessage(requestError));
+      }
+      return false;
+    } finally {
+      setTaskMutationPhase("idle");
+    }
+  };
+
+  const handleDeleteTask = async (task) => {
+    setTaskError("");
+    setTaskMutationPhase("deleting");
+    try {
+      await client.deleteTask({ token: session.token, taskId: task.id });
+      setProjectTasks((current) => current.filter((candidate) => candidate.id !== task.id));
+      setWorkItems((current) => current.filter((candidate) => candidate.id !== task.id));
+      updateProjectTaskCount(task.projectId, -1);
+      setSelectedTask(null);
+      return true;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setTaskError(errorMessage(requestError));
+      }
+      return false;
+    } finally {
+      setTaskMutationPhase("idle");
     }
   };
 
@@ -384,6 +443,7 @@ export default function App({ client = apiClient }) {
     setProjectTasks([]);
     setSelectedTask(null);
     setTaskError("");
+    setTaskMutationPhase("idle");
     setWorkItems([]);
     setProjectError("");
     setProjectPhase("idle");
@@ -550,8 +610,9 @@ export default function App({ client = apiClient }) {
           phase={projectPhase}
           error={projectError}
           selectedTask={selectedTask}
-          savingTask={savingTask}
+          savingTask={taskMutationPhase === "updating"}
           taskError={taskError}
+          taskMutationPhase={taskMutationPhase}
           projectMutationPhase={projectMutationPhase}
           projectMutationError={projectMutationError}
           onSelectProject={handleSelectProject}
@@ -561,6 +622,8 @@ export default function App({ client = apiClient }) {
           }}
           onCloseTask={() => setSelectedTask(null)}
           onSaveTask={handleSaveTask}
+          onCreateTask={handleCreateTask}
+          onDeleteTask={handleDeleteTask}
           onPlanFollowUp={handlePlanFollowUp}
           onUpdateProject={handleUpdateProject}
           onDeleteProject={handleDeleteProject}
@@ -572,7 +635,8 @@ export default function App({ client = apiClient }) {
           phase={projectPhase}
           error={projectError}
           selectedTask={selectedTask}
-          savingTask={savingTask}
+          savingTask={taskMutationPhase === "updating"}
+          taskMutationPhase={taskMutationPhase}
           taskError={taskError}
           onSelectTask={(task) => {
             setTaskError("");
@@ -580,6 +644,7 @@ export default function App({ client = apiClient }) {
           }}
           onCloseTask={() => setSelectedTask(null)}
           onSaveTask={handleSaveTask}
+          onDeleteTask={handleDeleteTask}
           onRetry={handleOpenMyWork}
         />
       ) : activeView === "account" ? (

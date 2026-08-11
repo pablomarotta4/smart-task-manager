@@ -574,6 +574,7 @@ describe("AI project workshop", () => {
     await user.clear(title);
     await user.type(title, "Capture qualified opportunity details");
     await user.selectOptions(within(panel).getByLabelText(/^status$/i), "IN_PROGRESS");
+    await user.clear(within(panel).getByLabelText(/due date/i));
     await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
 
     expect(client.updateTask).toHaveBeenCalledWith({
@@ -583,10 +584,57 @@ describe("AI project workshop", () => {
         title: "Capture qualified opportunity details",
         status: "IN_PROGRESS",
         projectId: 20,
+        dueDate: null,
       }),
     });
     expect(await screen.findByText("Capture qualified opportunity details"))
       .toBeInTheDocument();
+  });
+
+  it("creates a manual ticket and deletes it only after confirmation", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /add ticket/i }));
+    await user.type(screen.getByLabelText(/ticket title/i), "Prepare release notes");
+    await user.type(
+      screen.getByLabelText(/ticket description/i),
+      "Summarize changes and operator actions for the release.",
+    );
+    await user.selectOptions(screen.getByLabelText(/ticket priority/i), "HIGH");
+    await user.type(screen.getByLabelText(/ticket category/i), "Release");
+    await user.type(screen.getByLabelText(/ticket due date/i), "2026-08-22");
+    await user.click(screen.getByRole("button", { name: /^create ticket$/i }));
+
+    expect(client.createTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      task: {
+        title: "Prepare release notes",
+        description: "Summarize changes and operator actions for the release.",
+        status: "TODO",
+        projectId: 20,
+        assigneeId: null,
+        priority: "HIGH",
+        category: "Release",
+        dueDate: "2026-08-22",
+        position: null,
+      },
+    });
+    expect(await screen.findByText("Prepare release notes")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open prepare release notes/i }));
+    const panel = screen.getByRole("dialog", { name: /edit prepare release notes/i });
+    await user.click(within(panel).getByRole("button", { name: /^delete ticket$/i }));
+    expect(within(panel).getByText(/permanently removes this ticket/i)).toBeInTheDocument();
+    expect(client.deleteTask).not.toHaveBeenCalled();
+    await user.click(within(panel).getByRole("button", { name: /yes, delete ticket/i }));
+
+    expect(client.deleteTask).toHaveBeenCalledWith({ token: "jwt-token", taskId: 203 });
+    expect(screen.queryByText("Prepare release notes")).not.toBeInTheDocument();
   });
 
   it("loads every project backlog concurrently into My Work", async () => {

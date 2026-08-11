@@ -8,9 +8,11 @@ const labelFor = (value) => value.toLowerCase().replaceAll("_", " ");
 export default function TicketDetailPanel({
   task,
   saving,
+  deleting,
   error,
   onClose,
   onSave,
+  onDelete,
 }) {
   const closeButtonRef = useRef(null);
   const [draft, setDraft] = useState({
@@ -20,6 +22,7 @@ export default function TicketDetailPanel({
     priority: task.priority ?? "MEDIUM",
     dueDate: task.dueDate ?? "",
   });
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     const previouslyFocused = document.activeElement;
@@ -161,17 +164,58 @@ export default function TicketDetailPanel({
 
           {error ? <p className="error-banner" role="alert">{error}</p> : null}
 
-          <footer className="ticket-sheet-actions">
-            <button className="text-action" type="button" onClick={onClose}>Cancel</button>
-            <button
-              className="primary-action"
-              type="submit"
-              disabled={saving || !draft.title.trim()}
-              aria-busy={saving}
+          {confirmingDelete ? (
+            <div
+              className="ticket-delete-confirmation"
+              role="alertdialog"
+              aria-labelledby={`delete-ticket-${task.id}`}
             >
-              <span>{saving ? "Saving…" : "Save ticket"}</span>
-              <span aria-hidden="true">↗</span>
+              <div>
+                <h3 id={`delete-ticket-${task.id}`}>Delete {task.title}?</h3>
+                <p>This permanently removes this ticket. This action cannot be undone.</p>
+              </div>
+              <div>
+                <button
+                  className="text-action"
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Keep ticket
+                </button>
+                <button
+                  className="danger-action is-confirm"
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => onDelete(task)}
+                >
+                  {deleting ? "Deleting ticket…" : "Yes, delete ticket"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <footer className="ticket-sheet-actions">
+            <button
+              className="danger-action"
+              type="button"
+              disabled={saving || deleting}
+              onClick={() => setConfirmingDelete(true)}
+            >
+              Delete ticket
             </button>
+            <div>
+              <button className="text-action" type="button" onClick={onClose}>Cancel</button>
+              <button
+                className="primary-action"
+                type="submit"
+                disabled={saving || deleting || !draft.title.trim()}
+                aria-busy={saving}
+              >
+                <span>{saving ? "Saving…" : "Save ticket"}</span>
+                <span aria-hidden="true">↗</span>
+              </button>
+            </div>
           </footer>
         </form>
       </aside>

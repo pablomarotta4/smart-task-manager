@@ -48,10 +48,12 @@ export default function MyWorkSection({
   error,
   selectedTask,
   savingTask,
+  taskMutationPhase,
   taskError,
   onSelectTask,
   onCloseTask,
   onSaveTask,
+  onDeleteTask,
   onRetry,
 }) {
   const loading = phase === "loading-projects" || phase === "loading-tasks";
@@ -164,9 +166,11 @@ export default function MyWorkSection({
           key={selectedTask.id}
           task={selectedTask}
           saving={savingTask}
+          deleting={taskMutationPhase === "deleting"}
           error={taskError}
           onClose={onCloseTask}
           onSave={onSaveTask}
+          onDelete={onDeleteTask}
         />
       ) : null}
     </section>

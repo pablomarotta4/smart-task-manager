@@ -1,5 +1,8 @@
+import { useState } from "react";
+
 import TicketDetailPanel from "./TicketDetailPanel";
 import ProjectDesk from "./ProjectDesk";
+import TaskCreatePanel from "./TaskCreatePanel";
 
 const LANES = [
   { status: "TODO", label: "Todo", marker: "01" },
@@ -26,17 +29,21 @@ export default function BoardSection({
   selectedTask,
   savingTask,
   taskError,
+  taskMutationPhase,
   projectMutationPhase,
   projectMutationError,
   onSelectProject,
   onSelectTask,
   onCloseTask,
   onSaveTask,
+  onCreateTask,
+  onDeleteTask,
   onPlanFollowUp,
   onUpdateProject,
   onDeleteProject,
   onRetry,
 }) {
+  const [showTaskCreate, setShowTaskCreate] = useState(false);
   const loading = phase === "loading-projects" || phase === "loading-tasks";
   const activeTasks = tasks.filter((task) => task.status !== "CANCELLED");
   const completedCount = activeTasks.filter((task) => task.status === "DONE").length;
@@ -69,8 +76,28 @@ export default function BoardSection({
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
           </select>
+          <button
+            className="primary-action compact-action"
+            type="button"
+            aria-expanded={showTaskCreate}
+            disabled={loading || !selectedProject}
+            onClick={() => setShowTaskCreate((current) => !current)}
+          >
+            <span>Add ticket</span><span aria-hidden="true">＋</span>
+          </button>
         </div>
       </header>
+
+      {showTaskCreate && selectedProject && !loading ? (
+        <TaskCreatePanel
+          key={selectedProject.id}
+          project={selectedProject}
+          creating={taskMutationPhase === "creating"}
+          error={taskError}
+          onCreate={onCreateTask}
+          onCancel={() => setShowTaskCreate(false)}
+        />
+      ) : null}
 
       {error ? (
         <div className="projects-error" role="alert">
@@ -167,9 +194,11 @@ export default function BoardSection({
           key={selectedTask.id}
           task={selectedTask}
           saving={savingTask}
+          deleting={taskMutationPhase === "deleting"}
           error={taskError}
           onClose={onCloseTask}
           onSave={onSaveTask}
+          onDelete={onDeleteTask}
         />
       ) : null}
     </section>
