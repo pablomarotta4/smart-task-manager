@@ -9,6 +9,6 @@ public class ProjectRequest {
     @NotBlank
     private String name;
 
-    @NotBlank
+    // Retained temporarily for backward wire compatibility; ownership comes from authentication.
     private String username;
 }

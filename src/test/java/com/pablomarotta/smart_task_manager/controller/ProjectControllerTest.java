@@ -13,12 +13,15 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Arrays;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -57,9 +60,11 @@ class ProjectControllerTest {
 
     @Test
     void createProject_ShouldReturnCreatedProject() throws Exception {
-        when(projectService.createProject(any(ProjectRequest.class))).thenReturn(projectResponse);
+        when(projectService.createProject(any(ProjectRequest.class), eq("testuser")))
+                .thenReturn(projectResponse);
 
         mockMvc.perform(post("/api/projects")
+                .principal(new UsernamePasswordAuthenticationToken("testuser", "ignored"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(projectRequest)))
                 .andExpect(status().isCreated())
@@ -67,6 +72,8 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.name").value("Test Project"))
                 .andExpect(jsonPath("$.ownerId").value(1))
                 .andExpect(jsonPath("$.ownerUsername").value("testuser"));
+
+        verify(projectService).createProject(any(ProjectRequest.class), eq("testuser"));
     }
 
     @Test
@@ -76,6 +83,7 @@ class ProjectControllerTest {
         invalidRequest.setUsername(""); // Invalid: username is blank
 
         mockMvc.perform(post("/api/projects")
+                .principal(new UsernamePasswordAuthenticationToken("testuser", "ignored"))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(invalidRequest)))
                 .andExpect(status().isBadRequest());
@@ -89,32 +97,41 @@ class ProjectControllerTest {
         project2.setOwnerId(1L);
         project2.setOwnerUsername("testuser");
 
-        when(projectService.getAllProjects()).thenReturn(Arrays.asList(projectResponse, project2));
+        when(projectService.getAllProjects("testuser"))
+                .thenReturn(Arrays.asList(projectResponse, project2));
 
         mockMvc.perform(get("/api/projects")
+                .principal(new UsernamePasswordAuthenticationToken("testuser", "ignored"))
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].id").value(1))
                 .andExpect(jsonPath("$[1].id").value(2));
+
+        verify(projectService).getAllProjects("testuser");
     }
 
     @Test
     void getProjectById_WithValidId_ShouldReturnProject() throws Exception {
-        when(projectService.getProjectById(1L)).thenReturn(projectResponse);
+        when(projectService.getProjectById(1L, "testuser")).thenReturn(projectResponse);
 
         mockMvc.perform(get("/api/projects/1")
+                .principal(new UsernamePasswordAuthenticationToken("testuser", "ignored"))
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.name").value("Test Project"));
+
+        verify(projectService).getProjectById(1L, "testuser");
     }
 
     @Test
     void getProjectById_WithNonExistentId_ShouldReturnNotFound() throws Exception {
-        when(projectService.getProjectById(99L)).thenThrow(new ProjectNotFoundException("Project not found with id: 99"));
+        when(projectService.getProjectById(99L, "testuser"))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 99"));
 
         mockMvc.perform(get("/api/projects/99")
+                .principal(new UsernamePasswordAuthenticationToken("testuser", "ignored"))
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Project not found with id: 99"));

@@ -70,7 +70,7 @@ class ProjectServiceTest {
         when(projectRepository.save(any(Project.class))).thenReturn(project);
 
         // Act
-        ProjectResponse response = projectService.createProject(projectRequest);
+        ProjectResponse response = projectService.createProject(projectRequest, "testuser");
 
         // Assert
         assertNotNull(response);
@@ -83,13 +83,26 @@ class ProjectServiceTest {
     }
 
     @Test
+    void createProject_IgnoresClientSuppliedOwner() {
+        projectRequest.setUsername("attacker");
+        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(owner));
+        when(projectRepository.save(any(Project.class))).thenReturn(project);
+
+        ProjectResponse response = projectService.createProject(projectRequest, "testuser");
+
+        assertEquals("testuser", response.getOwnerUsername());
+        verify(userRepository).findByUsername("testuser");
+        verify(userRepository, never()).findByUsername("attacker");
+    }
+
+    @Test
     void createProject_WhenUserNotFound_ShouldThrowUserNotFoundException() {
         // Arrange
         when(userRepository.findByUsername("testuser")).thenReturn(Optional.empty());
 
         // Act & Assert
         assertThrows(UserNotFoundException.class, () -> {
-            projectService.createProject(projectRequest);
+            projectService.createProject(projectRequest, "testuser");
         });
         verify(userRepository, times(1)).findByUsername("testuser");
         verify(projectRepository, never()).save(any(Project.class));
@@ -103,7 +116,7 @@ class ProjectServiceTest {
 
         // Act & Assert
         assertThrows(ResponseStatusException.class, () -> {
-            projectService.createProject(projectRequest);
+            projectService.createProject(projectRequest, "testuser");
         });
     }
 
@@ -118,14 +131,15 @@ class ProjectServiceTest {
                 .createdAt(LocalDateTime.now().plusMinutes(1))
                 .build();
 
-        when(projectRepository.findAll()).thenReturn(Arrays.asList(project, project2));
+        when(projectRepository.findByOwnerUsernameOrderByCreatedAtDesc("testuser"))
+                .thenReturn(Arrays.asList(project2, project));
         when(taskRepository.countTasksByProject()).thenReturn(List.of(
                 taskCount(1L, 3L),
                 taskCount(2L, 6L)
         ));
 
         // Act
-        List<ProjectResponse> projects = projectService.getAllProjects();
+        List<ProjectResponse> projects = projectService.getAllProjects("testuser");
 
         // Assert
         assertNotNull(projects);
@@ -135,35 +149,38 @@ class ProjectServiceTest {
         assertEquals(6L, projects.get(0).getTaskCount());
         assertEquals("Test Project", projects.get(1).getName());
         assertEquals(3L, projects.get(1).getTaskCount());
-        verify(projectRepository, times(1)).findAll();
+        verify(projectRepository).findByOwnerUsernameOrderByCreatedAtDesc("testuser");
+        verify(projectRepository, never()).findAll();
         verify(taskRepository, times(1)).countTasksByProject();
     }
 
     @Test
     void getProjectById_WithValidId_ShouldReturnProject() {
         // Arrange
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(projectRepository.findByIdAndOwnerUsername(1L, "testuser"))
+                .thenReturn(Optional.of(project));
 
         // Act
-        ProjectResponse response = projectService.getProjectById(1L);
+        ProjectResponse response = projectService.getProjectById(1L, "testuser");
 
         // Assert
         assertNotNull(response);
         assertEquals(project.getId(), response.getId());
         assertEquals(project.getName(), response.getName());
-        verify(projectRepository, times(1)).findById(1L);
+        verify(projectRepository).findByIdAndOwnerUsername(1L, "testuser");
     }
 
     @Test
     void getProjectById_WithInvalidId_ShouldThrowProjectNotFoundException() {
         // Arrange
-        when(projectRepository.findById(99L)).thenReturn(Optional.empty());
+        when(projectRepository.findByIdAndOwnerUsername(99L, "testuser"))
+                .thenReturn(Optional.empty());
 
         // Act & Assert
         assertThrows(ProjectNotFoundException.class, () -> {
-            projectService.getProjectById(99L);
+            projectService.getProjectById(99L, "testuser");
         });
-        verify(projectRepository, times(1)).findById(99L);
+        verify(projectRepository).findByIdAndOwnerUsername(99L, "testuser");
     }
 
     private TaskRepository.ProjectTaskCount taskCount(Long projectId, Long taskCount) {

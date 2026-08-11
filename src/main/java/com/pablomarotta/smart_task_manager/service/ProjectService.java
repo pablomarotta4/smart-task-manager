@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -28,10 +27,10 @@ public class ProjectService {
     private final TaskRepository taskRepository;
 
     @Transactional
-    public ProjectResponse createProject(ProjectRequest projectRequest) {
+    public ProjectResponse createProject(ProjectRequest projectRequest, String username) {
         try {
-            User owner = userRepository.findByUsername(projectRequest.getUsername())
-                    .orElseThrow(() -> new UserNotFoundException("User not found with username: " + projectRequest.getUsername()));
+            User owner = userRepository.findByUsername(username)
+                    .orElseThrow(() -> new UserNotFoundException("User not found with username: " + username));
 
             Project project = Project.builder()
                     .name(projectRequest.getName())
@@ -52,25 +51,21 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
-    public List<ProjectResponse> getAllProjects() {
+    public List<ProjectResponse> getAllProjects(String username) {
         Map<Long, Long> taskCounts = taskRepository.countTasksByProject().stream()
                 .collect(Collectors.toMap(
                         TaskRepository.ProjectTaskCount::getProjectId,
                         TaskRepository.ProjectTaskCount::getTaskCount
                 ));
 
-        return projectRepository.findAll().stream()
-                .sorted(Comparator.comparing(
-                        Project::getCreatedAt,
-                        Comparator.nullsLast(Comparator.reverseOrder())
-                ))
+        return projectRepository.findByOwnerUsernameOrderByCreatedAtDesc(username).stream()
                 .map(project -> mapToResponse(project, taskCounts.getOrDefault(project.getId(), 0L)))
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public ProjectResponse getProjectById(Long id) {
-        Project project = projectRepository.findById(id)
+    public ProjectResponse getProjectById(Long id, String username) {
+        Project project = projectRepository.findByIdAndOwnerUsername(id, username)
                 .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + id));
         return mapToResponse(project, taskRepository.countByProjectId(id));
     }
