@@ -40,4 +40,3 @@ Turn the existing raw authentication endpoints into a usable and production-safe
 4. Add failing API-client and App tests for credentialed requests, registration, restored-session validation, one-time refresh/retry, shared concurrent refresh, expired-session messaging, and server logout.
 5. Implement the frontend, run the full frontend suite and production build, then exercise registration, refresh recovery, and logout in a real browser with controlled API responses.
 6. Review the branch for authorization, token leakage, cookie scope, request races, error-state honesty, and accessibility. Run `git diff --check`, commit the reviewed changes, and fast-forward merge only with a clean worktree.
-

@@ -17,4 +17,3 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
     @Query("select token from RefreshToken token join fetch token.user where token.tokenHash = :tokenHash")
     Optional<RefreshToken> findForUpdateByTokenHash(@Param("tokenHash") String tokenHash);
 }
-

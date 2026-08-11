@@ -112,4 +112,3 @@ public class RefreshTokenService {
     public record IssuedRefreshToken(String value, String username, LocalDateTime expiresAt) {
     }
 }
-
