@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from smart_task_ai.contracts import Priority, ProjectDraft, TicketDraft
+from smart_task_ai.contracts import (
+    PlanningContext,
+    PlanningProjectContext,
+    PlanningTaskContext,
+    Priority,
+    ProjectDraft,
+    TicketDraft,
+)
 from smart_task_ai.quality import evaluate_draft, find_missing_capabilities, normalize_title
 
 
@@ -40,6 +47,36 @@ def adequate_draft() -> ProjectDraft:
             ticket("budget", "Configure monthly category budgets"),
             ticket("dashboard", "Display spending against the budget"),
         ]
+    )
+
+
+def reminder_context() -> PlanningContext:
+    return PlanningContext(
+        mode="EXISTING_TASK",
+        project=PlanningProjectContext(
+            id=10,
+            name="Operations Workspace",
+            objective="Coordinate reliable internal workflows.",
+        ),
+        selected_task_id=101,
+        tasks=[
+            PlanningTaskContext(
+                id=101,
+                title="Deliver email reminders",
+                description="Notify assignees before due dates and while work is overdue.",
+                status="TODO",
+                acceptance_criteria=[
+                    "An email reminder is sent one day before the due date",
+                    "Overdue assignees receive no more than one email reminder per day",
+                ],
+            ),
+            PlanningTaskContext(
+                id=102,
+                title="Configure notification preferences",
+                description="Let each member choose which project notifications they receive.",
+                status="IN_PROGRESS",
+            ),
+        ],
     )
 
 
@@ -122,3 +159,32 @@ def test_capability_coverage_ignores_broad_goal_verbs_actors_and_context_modifie
             "manage customer pickup",
         ],
     ) == []
+
+
+def test_contextual_quality_flags_selected_ticket_drift() -> None:
+    report = evaluate_draft(adequate_draft(), context=reminder_context())
+
+    assert "selected_ticket_drift" in {issue.code for issue in report.issues}
+    assert report.passed is False
+
+
+def test_contextual_quality_flags_duplicate_existing_project_work() -> None:
+    plan = draft(
+        [
+            ticket("reminder", "Deliver email reminders"),
+            ticket("preferences", "Configure notification preferences"),
+            ticket("schedule", "Schedule overdue reminder delivery"),
+        ]
+    )
+    plan.tickets[0].acceptance_criteria = [
+        "An email reminder is sent one day before the due date",
+        "Overdue assignees receive no more than one email reminder per day",
+    ]
+
+    report = evaluate_draft(plan, context=reminder_context())
+
+    duplicate_issue = next(
+        issue for issue in report.issues if issue.code == "duplicates_existing_work"
+    )
+    assert duplicate_issue.ticket_ids == ["preferences"]
+    assert report.passed is False

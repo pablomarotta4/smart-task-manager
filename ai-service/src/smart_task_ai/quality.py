@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from itertools import combinations
 
 from smart_task_ai.contracts import (
+    PlanningContext,
     ProjectDraft,
     QualityIssue,
     QualityMetrics,
@@ -23,9 +24,11 @@ GENERIC_CAPABILITY_TOKENS = {
     "allow",
     "build",
     "create",
+    "coordinate",
     "customer",
     "customers",
     "develop",
+    "deliver",
     "enable",
     "expose",
     "facilitate",
@@ -44,6 +47,18 @@ GENERIC_CAPABILITY_TOKENS = {
     "users",
 }
 NON_ENFORCEABLE_GOAL_VERBS = {"build", "develop", "organize"}
+GENERIC_WORK_TITLE_TOKENS = {
+    "add",
+    "build",
+    "configure",
+    "create",
+    "deliver",
+    "enable",
+    "implement",
+    "set",
+    "setup",
+    "support",
+}
 
 
 def normalize_title(title: str) -> str:
@@ -95,7 +110,49 @@ def find_missing_capabilities(draft: ProjectDraft, capabilities: list[str]) -> l
     ]
 
 
-def evaluate_draft(draft: ProjectDraft) -> QualityReport:
+def _selected_ticket_capabilities(context: PlanningContext) -> list[str]:
+    selected = next(task for task in context.tasks if task.id == context.selected_task_id)
+    return selected.acceptance_criteria or [selected.title]
+
+
+def _duplicate_existing_work_ids(
+    draft: ProjectDraft,
+    context: PlanningContext,
+) -> list[str]:
+    sibling_titles = [
+        normalize_title(task.title)
+        for task in context.tasks
+        if task.id != context.selected_task_id and task.status != "CANCELLED"
+    ]
+    sibling_intents = [
+        normalized_tokens(title) - GENERIC_WORK_TITLE_TOKENS for title in sibling_titles
+    ]
+    duplicate_ids: list[str] = []
+    for ticket in draft.tickets:
+        title = normalize_title(ticket.title)
+        intent = normalized_tokens(title) - GENERIC_WORK_TITLE_TOKENS
+        duplicates_sibling = any(
+            title == sibling_title
+            or SequenceMatcher(None, title, sibling_title).ratio() >= SIMILARITY_THRESHOLD
+            or (
+                bool(intent)
+                and bool(sibling_intent)
+                and len(intent & sibling_intent) / len(intent | sibling_intent) >= 0.75
+            )
+            for sibling_title, sibling_intent in zip(
+                sibling_titles, sibling_intents, strict=True
+            )
+        )
+        if duplicates_sibling:
+            duplicate_ids.append(ticket.client_id)
+    return duplicate_ids
+
+
+def evaluate_draft(
+    draft: ProjectDraft,
+    *,
+    context: PlanningContext | None = None,
+) -> QualityReport:
     normalized_titles = [normalize_title(ticket.title) for ticket in draft.tickets]
     title_counts = Counter(normalized_titles)
     duplicate_titles = {title for title, count in title_counts.items() if count > 1}
@@ -178,6 +235,36 @@ def evaluate_draft(draft: ProjectDraft) -> QualityReport:
             )
         )
         deductions += min(30, 10 * len(thin_criteria_ids))
+
+    if context is not None:
+        missing_selected_capabilities = find_missing_capabilities(
+            draft, _selected_ticket_capabilities(context)
+        )
+        if missing_selected_capabilities:
+            preview = "; ".join(missing_selected_capabilities[:3])
+            issues.append(
+                QualityIssue(
+                    code="selected_ticket_drift",
+                    message=(
+                        "The child plan does not implement the selected ticket: "
+                        f"{preview}."
+                    ),
+                )
+            )
+            deductions += 40
+
+        duplicate_existing_ids = _duplicate_existing_work_ids(draft, context)
+        if duplicate_existing_ids:
+            issues.append(
+                QualityIssue(
+                    code="duplicates_existing_work",
+                    message=(
+                        "Some proposed tickets duplicate non-selected work already in the project."
+                    ),
+                    ticket_ids=duplicate_existing_ids,
+                )
+            )
+            deductions += 35
 
     ticket_count = len(draft.tickets)
     metrics = QualityMetrics(

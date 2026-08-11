@@ -130,7 +130,10 @@ class ProjectPlanner:
         draft = state.get("draft")
         if draft is None:
             raise RuntimeError("planning graph cannot assess a missing draft")
-        quality = evaluate_draft(draft)
+        context = state.get("context")
+        quality = evaluate_draft(draft, context=context)
+        if context is not None:
+            return PlanningState(quality=quality)
         missing_capabilities = find_missing_capabilities(
             draft, state.get("explicit_capabilities", [])
         )
