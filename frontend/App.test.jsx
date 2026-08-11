@@ -262,6 +262,10 @@ const failedExistingPlanningRun = {
 
 const createClient = () => ({
   login: vi.fn().mockResolvedValue(authenticatedUser),
+  register: vi.fn().mockResolvedValue(authenticatedUser),
+  getCurrentUser: vi.fn().mockResolvedValue(authenticatedUser.user),
+  refreshSession: vi.fn().mockResolvedValue(authenticatedUser),
+  logout: vi.fn().mockResolvedValue(null),
   generateProject: vi.fn().mockResolvedValue(generatedDraft),
   generateTaskPlan: vi.fn().mockResolvedValue(generatedDraft),
   confirmProject: vi.fn(),
@@ -340,6 +344,145 @@ describe("AI project workshop", () => {
     expect(sessionStorage.getItem("smart-task-session")).toContain("jwt-token");
   });
 
+  it("creates an account from the access panel and opens an authenticated session", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.register.mockResolvedValue({
+      token: "registered-token",
+      user: {
+        id: 21,
+        username: "new-planner",
+        fullName: "New Planner",
+        email: "new@example.com",
+      },
+    });
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /create account/i }));
+    await user.type(screen.getByLabelText(/full name/i), "New Planner");
+    await user.type(screen.getByLabelText(/email/i), "new@example.com");
+    await user.type(screen.getByLabelText(/username/i), "new-planner");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /create my workspace/i }));
+
+    expect(client.register).toHaveBeenCalledWith({
+      fullName: "New Planner",
+      email: "new@example.com",
+      username: "new-planner",
+      password: "password123",
+    });
+    expect(await screen.findByText("New Planner")).toBeInTheDocument();
+    expect(sessionStorage.getItem("smart-task-session")).toContain("registered-token");
+  });
+
+  it("validates a stored session before restoring the workspace", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getCurrentUser.mockResolvedValue({
+      ...authenticatedUser.user,
+      fullName: "Validated Profile",
+    });
+
+    render(<App client={client} />);
+
+    expect(await screen.findByText("Validated Profile")).toBeInTheDocument();
+    expect(client.getCurrentUser).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getGenerationRuns).toHaveBeenCalledWith({ token: "jwt-token" });
+  });
+
+  it("renews a stale stored access token before loading private workspace data", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getCurrentUser.mockRejectedValue(new ApiError("Unauthorized", { status: 401 }));
+    client.refreshSession.mockResolvedValue({
+      token: "restored-token",
+      user: { ...authenticatedUser.user, fullName: "Restored Profile" },
+    });
+
+    render(<App client={client} />);
+
+    expect(await screen.findByText("Restored Profile")).toBeInTheDocument();
+    expect(client.refreshSession).toHaveBeenCalledTimes(1);
+    expect(client.getGenerationRuns).toHaveBeenCalledWith({ token: "restored-token" });
+    expect(sessionStorage.getItem("smart-task-session")).toContain("restored-token");
+  });
+
+  it("refreshes an expired access token and retries the protected action once", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.generateProject
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(generatedDraft);
+    client.refreshSession.mockResolvedValue({
+      token: "renewed-token",
+      user: authenticatedUser.user,
+    });
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    const prompt = "Build a home renovation plan for redesigning and delivering a new kitchen";
+    await user.type(screen.getByLabelText(/describe your project/i), prompt);
+    await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+
+    expect(await screen.findByRole("heading", { name: "Kitchen Redesign Project" }))
+      .toBeInTheDocument();
+    expect(client.refreshSession).toHaveBeenCalledTimes(1);
+    expect(client.generateProject).toHaveBeenNthCalledWith(1, { token: "jwt-token", prompt });
+    expect(client.generateProject).toHaveBeenNthCalledWith(2, { token: "renewed-token", prompt });
+    expect(sessionStorage.getItem("smart-task-session")).toContain("renewed-token");
+  });
+
+  it("uses one refresh when a grouped protected request expires", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveRefresh;
+    client.getProjectTasks
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(savedProjectTasks);
+    client.getProjectMembers
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(projectMembers);
+    client.refreshSession.mockReturnValue(new Promise((resolve) => {
+      resolveRefresh = resolve;
+    }));
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await waitFor(() => expect(client.refreshSession).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      resolveRefresh({ token: "renewed-token", user: authenticatedUser.user });
+    });
+
+    await waitFor(() => expect(client.getProjectTasks).toHaveBeenCalledTimes(2));
+    expect(client.getProjectTasks).toHaveBeenLastCalledWith({
+      token: "renewed-token",
+      projectId: 20,
+    });
+    expect(client.getProjectMembers).toHaveBeenLastCalledWith({
+      token: "renewed-token",
+      projectId: 20,
+    });
+  });
+
+  it("clears a stored session when neither access nor refresh token is valid", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getCurrentUser.mockRejectedValue(new ApiError("Unauthorized", { status: 401 }));
+    client.refreshSession.mockRejectedValue(
+      new ApiError("Refresh token is invalid or expired", { status: 401 }),
+    );
+
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /your session expired\. sign in again/i,
+    );
+    expect(sessionStorage.getItem("smart-task-session")).toBeNull();
+  });
+
   it("shows honest progress while generating and then displays the draft", async () => {
     const user = userEvent.setup();
     let resolveGeneration;
@@ -405,7 +548,7 @@ describe("AI project workshop", () => {
 
     expect(await screen.findByRole("heading", { name: /recent ai plans/i }))
       .toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /resume draft/i }));
+    await user.click(await screen.findByRole("button", { name: /resume draft/i }));
 
     expect(client.getGenerationRun).toHaveBeenCalledWith({
       token: "jwt-token",
@@ -475,7 +618,7 @@ describe("AI project workshop", () => {
       .mockResolvedValueOnce([]);
 
     render(<App client={client} />);
-    await user.click(screen.getByRole("button", { name: /log out/i }));
+    await user.click(await screen.findByRole("button", { name: /log out/i }));
     await logIn(user, client);
     await waitFor(() => expect(client.getGenerationRuns).toHaveBeenCalledTimes(2));
     await act(async () => {
@@ -1059,5 +1202,22 @@ describe("AI project workshop", () => {
 
     expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
       .toBeInTheDocument();
+    expect(client.logout).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem("smart-task-session")).toBeNull();
+  });
+
+  it("still clears local access when the logout endpoint is unavailable", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.logout.mockRejectedValue(new ApiError("Cannot reach the API"));
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+
+    expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/signed out locally/i);
+    expect(sessionStorage.getItem("smart-task-session")).toBeNull();
   });
 });

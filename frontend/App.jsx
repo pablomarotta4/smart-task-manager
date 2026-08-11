@@ -25,7 +25,18 @@ const errorMessage = (error) =>
 
 export default function App({ client = apiClient }) {
   const [session, setSession] = useState(readSession);
+  const [sessionStatus, setSessionStatus] = useState(() => (
+    sessionStorage.getItem(SESSION_KEY) ? "checking" : "ready"
+  ));
+  const [sessionNotice, setSessionNotice] = useState("");
+  const [authMode, setAuthMode] = useState("login");
   const [credentials, setCredentials] = useState({ username: "", password: "" });
+  const [registration, setRegistration] = useState({
+    fullName: "",
+    email: "",
+    username: "",
+    password: "",
+  });
   const [prompt, setPrompt] = useState("");
   const [draftResponse, setDraftResponse] = useState(null);
   const [editableDraft, setEditableDraft] = useState(null);
@@ -53,10 +64,142 @@ export default function App({ client = apiClient }) {
   const [recentRunsError, setRecentRunsError] = useState("");
   const [busyRunId, setBusyRunId] = useState(null);
   const recentRunsRequestId = useRef(0);
-
+  const sessionRequestId = useRef(0);
+  const refreshPromise = useRef(null);
   const sessionToken = session?.token;
-  const loadRecentRuns = useCallback(async () => {
+
+  const persistSession = useCallback((authenticated) => {
+    const nextSession = { token: authenticated.token, user: authenticated.user };
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+    setSession(nextSession);
+    setSessionStatus("ready");
+    setSessionNotice("");
+    return nextSession;
+  }, []);
+
+  const clearWorkspaceSession = useCallback((notice = "") => {
+    sessionRequestId.current += 1;
+    recentRunsRequestId.current += 1;
+    refreshPromise.current = null;
+    sessionStorage.removeItem(SESSION_KEY);
+    setSession(null);
+    setSessionStatus("ready");
+    setSessionNotice(notice);
+    setDraftResponse(null);
+    setEditableDraft(null);
+    setConfirmation(null);
+    setPlanningTarget(null);
+    setActiveView("workshop");
+    setProjects([]);
+    setSelectedProject(null);
+    setProjectTasks([]);
+    setProjectMembers([]);
+    setSelectedTask(null);
+    setTaskError("");
+    setMemberError("");
+    setMemberMutationPhase("idle");
+    setTaskMutationPhase("idle");
+    setWorkItems([]);
+    setRecentRuns([]);
+    setRecentRunsError("");
+    setRecentRunsPhase("idle");
+    setBusyRunId(null);
+    setProjectError("");
+    setProjectPhase("idle");
+    setProjectMutationError("");
+    setProjectMutationPhase("idle");
+    setCredentials((current) => ({ ...current, password: "" }));
+    setRegistration({ fullName: "", email: "", username: "", password: "" });
+    setError("");
+    setPhase("idle");
+  }, []);
+
+  const refreshAccessToken = useCallback(() => {
+    if (refreshPromise.current) return refreshPromise.current;
+    const requestId = sessionRequestId.current;
+    const pendingRefresh = client.refreshSession()
+      .then((authenticated) => {
+        if (sessionRequestId.current !== requestId) {
+          throw new ApiError("Session changed while it was being refreshed", { status: 401 });
+        }
+        persistSession(authenticated);
+        return authenticated.token;
+      })
+      .finally(() => {
+        if (refreshPromise.current === pendingRefresh) {
+          refreshPromise.current = null;
+        }
+      });
+    refreshPromise.current = pendingRefresh;
+    return pendingRefresh;
+  }, [client, persistSession]);
+
+  const runAuthenticated = useCallback(async (operation) => {
     if (!sessionToken) {
+      throw new ApiError("Your session expired. Sign in again.", { status: 401 });
+    }
+    try {
+      return await operation(sessionToken);
+    } catch (requestError) {
+      if (!(requestError instanceof ApiError) || requestError.status !== 401) {
+        throw requestError;
+      }
+    }
+
+    try {
+      const renewedToken = await refreshAccessToken();
+      return await operation(renewedToken);
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        clearWorkspaceSession("Your session expired. Sign in again.");
+        throw new ApiError("Your session expired. Sign in again.", { status: 401 });
+      }
+      throw requestError;
+    }
+  }, [clearWorkspaceSession, refreshAccessToken, sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken || sessionStatus !== "checking") return undefined;
+    const requestId = sessionRequestId.current + 1;
+    sessionRequestId.current = requestId;
+    let active = true;
+
+    const validateSession = async () => {
+      try {
+        const user = await client.getCurrentUser({ token: sessionToken });
+        if (!active || sessionRequestId.current !== requestId) return;
+        persistSession({ token: sessionToken, user });
+      } catch (requestError) {
+        if (!active || sessionRequestId.current !== requestId) return;
+        if (requestError instanceof ApiError && requestError.status === 401) {
+          try {
+            const authenticated = await client.refreshSession();
+            if (!active || sessionRequestId.current !== requestId) return;
+            persistSession(authenticated);
+          } catch (refreshError) {
+            if (!active || sessionRequestId.current !== requestId) return;
+            if (refreshError instanceof ApiError && refreshError.status === 401) {
+              clearWorkspaceSession("Your session expired. Sign in again.");
+            } else {
+              setSessionNotice("Cannot restore your session while the API is unavailable.");
+              setSessionStatus("unavailable");
+            }
+          }
+        } else {
+          setSessionNotice("Cannot restore your session while the API is unavailable.");
+          setSessionStatus("unavailable");
+        }
+      }
+    };
+
+    void validateSession();
+    return () => {
+      active = false;
+    };
+  }, [clearWorkspaceSession, client, persistSession, sessionStatus, sessionToken]);
+
+  const loadRecentRuns = useCallback(async () => {
+    if (!sessionToken || sessionStatus !== "ready") {
       recentRunsRequestId.current += 1;
       setRecentRuns([]);
       return;
@@ -66,15 +209,12 @@ export default function App({ client = apiClient }) {
     setRecentRunsError("");
     setRecentRunsPhase("loading");
     try {
-      const runs = await client.getGenerationRuns({ token: sessionToken });
+      const runs = await runAuthenticated((token) => client.getGenerationRuns({ token }));
       if (recentRunsRequestId.current !== requestId) return;
       setRecentRuns(runs);
     } catch (requestError) {
       if (recentRunsRequestId.current !== requestId) return;
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setRecentRunsError(errorMessage(requestError));
       }
     } finally {
@@ -82,7 +222,7 @@ export default function App({ client = apiClient }) {
         setRecentRunsPhase("idle");
       }
     }
-  }, [client, sessionToken]);
+  }, [client, runAuthenticated, sessionStatus, sessionToken]);
 
   useEffect(() => {
     void loadRecentRuns();
@@ -93,15 +233,42 @@ export default function App({ client = apiClient }) {
     setCredentials((current) => ({ ...current, [name]: value }));
   };
 
+  const handleRegistrationChange = (event) => {
+    const { name, value } = event.target;
+    setRegistration((current) => ({ ...current, [name]: value }));
+  };
+
+  const selectAuthMode = (mode) => {
+    setAuthMode(mode);
+    setError("");
+    setSessionNotice("");
+  };
+
   const handleLogin = async (event) => {
     event.preventDefault();
     setError("");
     setPhase("logging-in");
     try {
       const authenticated = await client.login(credentials);
-      const nextSession = { token: authenticated.token, user: authenticated.user };
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
-      setSession(nextSession);
+      sessionRequestId.current += 1;
+      persistSession(authenticated);
+      setCredentials((current) => ({ ...current, password: "" }));
+      setPhase("idle");
+    } catch (requestError) {
+      setError(errorMessage(requestError));
+      setPhase("idle");
+    }
+  };
+
+  const handleRegister = async (event) => {
+    event.preventDefault();
+    setError("");
+    setPhase("registering");
+    try {
+      const authenticated = await client.register(registration);
+      sessionRequestId.current += 1;
+      persistSession(authenticated);
+      setRegistration({ fullName: "", email: "", username: "", password: "" });
       setPhase("idle");
     } catch (requestError) {
       setError(errorMessage(requestError));
@@ -115,26 +282,22 @@ export default function App({ client = apiClient }) {
     setPhase("generating");
     try {
       const generationRequest = {
-        token: session.token,
         prompt: prompt.trim(),
       };
-      const response = planningTarget
-        ? await client.generateTaskPlan({
+      const response = await runAuthenticated((token) => planningTarget
+        ? client.generateTaskPlan({
           ...generationRequest,
+          token,
           projectId: planningTarget.project.id,
           taskId: planningTarget.task.id,
         })
-        : await client.generateProject(generationRequest);
+        : client.generateProject({ ...generationRequest, token }));
       setDraftResponse(response);
       setEditableDraft(structuredClone(response.draft));
       setConfirmation(null);
       setPhase("reviewing");
       void loadRecentRuns();
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      }
       setError(errorMessage(requestError));
       setPhase("idle");
       void loadRecentRuns();
@@ -146,19 +309,15 @@ export default function App({ client = apiClient }) {
     setError("");
     setPhase("confirming");
     try {
-      const response = await client.confirmProject({
-        token: session.token,
+      const response = await runAuthenticated((token) => client.confirmProject({
+        token,
         runId: draftResponse.runId,
         draft: editableDraft,
-      });
+      }));
       setConfirmation(response);
       setPhase("confirmed");
       void loadRecentRuns();
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      }
       setError(errorMessage(requestError));
       setPhase("reviewing");
     }
@@ -176,10 +335,6 @@ export default function App({ client = apiClient }) {
   };
 
   const handleProjectRequestError = (requestError) => {
-    if (requestError instanceof ApiError && requestError.status === 401) {
-      sessionStorage.removeItem(SESSION_KEY);
-      setSession(null);
-    }
     setProjectError(errorMessage(requestError));
     setProjectPhase("idle");
   };
@@ -195,11 +350,13 @@ export default function App({ client = apiClient }) {
     setSelectedTask(null);
 
     try {
-      const projectsRequest = client.getProjects({ token: session.token });
-      const tasksRequest = projectId === null
-        ? Promise.resolve(null)
-        : client.getProjectTasks({ token: session.token, projectId });
-      const [loadedProjects, loadedTasks] = await Promise.all([projectsRequest, tasksRequest]);
+      const [loadedProjects, loadedTasks] = await runAuthenticated((token) => {
+        const projectsRequest = client.getProjects({ token });
+        const tasksRequest = projectId === null
+          ? Promise.resolve(null)
+          : client.getProjectTasks({ token, projectId });
+        return Promise.all([projectsRequest, tasksRequest]);
+      });
       setProjects(loadedProjects);
 
       if (projectId !== null) {
@@ -222,10 +379,10 @@ export default function App({ client = apiClient }) {
     setMemberError("");
     setProjectPhase("loading-tasks");
     try {
-      const [tasks, members] = await Promise.all([
-        client.getProjectTasks({ token: session.token, projectId: project.id }),
-        client.getProjectMembers({ token: session.token, projectId: project.id }),
-      ]);
+      const [tasks, members] = await runAuthenticated((token) => Promise.all([
+        client.getProjectTasks({ token, projectId: project.id }),
+        client.getProjectMembers({ token, projectId: project.id }),
+      ]));
       setProjectTasks(tasks);
       setProjectMembers(members);
       setProjectPhase("idle");
@@ -246,7 +403,7 @@ export default function App({ client = apiClient }) {
     setProjectMutationError("");
     setProjectMutationPhase("creating");
     try {
-      const created = await client.createProject({ token: session.token, project });
+      const created = await runAuthenticated((token) => client.createProject({ token, project }));
       setProjects((current) => [created, ...current.filter(
         (candidate) => candidate.id !== created.id,
       )]);
@@ -256,10 +413,7 @@ export default function App({ client = apiClient }) {
       setSelectedTask(null);
       return true;
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setProjectMutationError(errorMessage(requestError));
       }
       return false;
@@ -272,11 +426,11 @@ export default function App({ client = apiClient }) {
     setProjectMutationError("");
     setProjectMutationPhase("updating");
     try {
-      const updated = await client.updateProject({
-        token: session.token,
+      const updated = await runAuthenticated((token) => client.updateProject({
+        token,
         projectId: project.id,
         project: projectDraft,
-      });
+      }));
       const mergedProject = { ...project, ...updated };
       setProjects((current) => current.map(
         (candidate) => candidate.id === project.id ? mergedProject : candidate,
@@ -284,10 +438,7 @@ export default function App({ client = apiClient }) {
       setSelectedProject((current) => current?.id === project.id ? mergedProject : current);
       return true;
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setProjectMutationError(errorMessage(requestError));
       }
       return false;
@@ -300,7 +451,7 @@ export default function App({ client = apiClient }) {
     setProjectMutationError("");
     setProjectMutationPhase("deleting");
     try {
-      await client.deleteProject({ token: session.token, projectId: project.id });
+      await runAuthenticated((token) => client.deleteProject({ token, projectId: project.id }));
       setProjects((current) => current.filter((candidate) => candidate.id !== project.id));
       setSelectedProject(null);
       setProjectTasks([]);
@@ -309,10 +460,7 @@ export default function App({ client = apiClient }) {
       setActiveView("projects");
       return true;
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setProjectMutationError(errorMessage(requestError));
       }
       return false;
@@ -331,7 +479,7 @@ export default function App({ client = apiClient }) {
     setSelectedTask(null);
 
     try {
-      const loadedProjects = await client.getProjects({ token: session.token });
+      const loadedProjects = await runAuthenticated((token) => client.getProjects({ token }));
       setProjects(loadedProjects);
       const project = projectId === null
         ? loadedProjects[0] ?? null
@@ -342,10 +490,10 @@ export default function App({ client = apiClient }) {
 
       if (project) {
         setProjectPhase("loading-tasks");
-        const [tasks, members] = await Promise.all([
-          client.getProjectTasks({ token: session.token, projectId: project.id }),
-          client.getProjectMembers({ token: session.token, projectId: project.id }),
-        ]);
+        const [tasks, members] = await runAuthenticated((token) => Promise.all([
+          client.getProjectTasks({ token, projectId: project.id }),
+          client.getProjectMembers({ token, projectId: project.id }),
+        ]));
         setProjectTasks(tasks);
         setProjectMembers(members);
       }
@@ -359,11 +507,11 @@ export default function App({ client = apiClient }) {
     setTaskMutationPhase("updating");
     setTaskError("");
     try {
-      const updated = await client.updateTask({
-        token: session.token,
+      const updated = await runAuthenticated((token) => client.updateTask({
+        token,
         taskId: task.id,
         task: taskDraft,
-      });
+      }));
       const mergedTask = {
         ...task,
         title: updated.title ?? taskDraft.title,
@@ -386,10 +534,7 @@ export default function App({ client = apiClient }) {
       ));
       setSelectedTask(null);
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setTaskError(errorMessage(requestError));
       }
     } finally {
@@ -410,7 +555,7 @@ export default function App({ client = apiClient }) {
     setTaskError("");
     setTaskMutationPhase("creating");
     try {
-      const created = await client.createTask({ token: session.token, task });
+      const created = await runAuthenticated((token) => client.createTask({ token, task }));
       const normalizedTask = {
         acceptanceCriteria: [],
         dependsOn: [],
@@ -424,10 +569,7 @@ export default function App({ client = apiClient }) {
       updateProjectTaskCount(task.projectId, 1);
       return true;
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setTaskError(errorMessage(requestError));
       }
       return false;
@@ -440,17 +582,14 @@ export default function App({ client = apiClient }) {
     setTaskError("");
     setTaskMutationPhase("deleting");
     try {
-      await client.deleteTask({ token: session.token, taskId: task.id });
+      await runAuthenticated((token) => client.deleteTask({ token, taskId: task.id }));
       setProjectTasks((current) => current.filter((candidate) => candidate.id !== task.id));
       setWorkItems((current) => current.filter((candidate) => candidate.id !== task.id));
       updateProjectTaskCount(task.projectId, -1);
       setSelectedTask(null);
       return true;
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setTaskError(errorMessage(requestError));
       }
       return false;
@@ -467,7 +606,7 @@ export default function App({ client = apiClient }) {
     setWorkItems([]);
 
     try {
-      const assignedTasks = await client.getMyWork({ token: session.token });
+      const assignedTasks = await runAuthenticated((token) => client.getMyWork({ token }));
       setWorkItems(assignedTasks);
       setProjectPhase("idle");
     } catch (requestError) {
@@ -479,21 +618,18 @@ export default function App({ client = apiClient }) {
     setMemberError("");
     setMemberMutationPhase("adding");
     try {
-      const member = await client.addProjectMember({
-        token: session.token,
+      const member = await runAuthenticated((token) => client.addProjectMember({
+        token,
         projectId: selectedProject.id,
         username,
-      });
+      }));
       setProjectMembers((current) => [
         ...current.filter((candidate) => candidate.userId !== member.userId),
         member,
       ]);
       return true;
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setMemberError(errorMessage(requestError));
       }
       return false;
@@ -506,11 +642,11 @@ export default function App({ client = apiClient }) {
     setMemberError("");
     setMemberMutationPhase("removing");
     try {
-      await client.removeProjectMember({
-        token: session.token,
+      await runAuthenticated((token) => client.removeProjectMember({
+        token,
         projectId: selectedProject.id,
         userId: member.userId,
-      });
+      }));
       setProjectMembers((current) => current.filter(
         (candidate) => candidate.userId !== member.userId,
       ));
@@ -519,10 +655,7 @@ export default function App({ client = apiClient }) {
         : task));
       return true;
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setMemberError(errorMessage(requestError));
       }
       return false;
@@ -581,16 +714,13 @@ export default function App({ client = apiClient }) {
     setBusyRunId(run.runId);
     setRecentRunsError("");
     try {
-      const response = await client.getGenerationRun({
-        token: session.token,
+      const response = await runAuthenticated((token) => client.getGenerationRun({
+        token,
         runId: run.runId,
-      });
+      }));
       restoreDraft(response, response);
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setRecentRunsError(errorMessage(requestError));
       }
     } finally {
@@ -607,17 +737,14 @@ export default function App({ client = apiClient }) {
     setPrompt(run.prompt);
     setActiveView("workshop");
     try {
-      const response = await client.retryGenerationRun({
-        token: session.token,
+      const response = await runAuthenticated((token) => client.retryGenerationRun({
+        token,
         runId: run.runId,
-      });
+      }));
       restoreDraft(response, run);
       void loadRecentRuns();
     } catch (requestError) {
-      if (requestError instanceof ApiError && requestError.status === 401) {
-        sessionStorage.removeItem(SESSION_KEY);
-        setSession(null);
-      } else {
+      if (!(requestError instanceof ApiError && requestError.status === 401)) {
         setError(errorMessage(requestError));
         setPhase("idle");
         void loadRecentRuns();
@@ -627,36 +754,60 @@ export default function App({ client = apiClient }) {
     }
   };
 
-  const handleLogout = () => {
-    recentRunsRequestId.current += 1;
-    sessionStorage.removeItem(SESSION_KEY);
-    setSession(null);
-    setDraftResponse(null);
-    setEditableDraft(null);
-    setConfirmation(null);
-    setPlanningTarget(null);
-    setActiveView("workshop");
-    setProjects([]);
-    setSelectedProject(null);
-    setProjectTasks([]);
-    setProjectMembers([]);
-    setSelectedTask(null);
-    setTaskError("");
-    setMemberError("");
-    setMemberMutationPhase("idle");
-    setTaskMutationPhase("idle");
-    setWorkItems([]);
-    setRecentRuns([]);
-    setRecentRunsError("");
-    setRecentRunsPhase("idle");
-    setBusyRunId(null);
-    setProjectError("");
-    setProjectPhase("idle");
-    setProjectMutationError("");
-    setProjectMutationPhase("idle");
-    setError("");
-    setPhase("idle");
+  const handleLogout = async () => {
+    setPhase("logging-out");
+    let notice = "";
+    const pendingRefresh = refreshPromise.current;
+    sessionRequestId.current += 1;
+    try {
+      if (pendingRefresh) {
+        try {
+          await pendingRefresh;
+        } catch {
+          // The logout request remains idempotent and clears whichever cookie is current.
+        }
+      }
+      await client.logout();
+    } catch {
+      notice = "Signed out locally. The API could not confirm server-side logout.";
+    } finally {
+      clearWorkspaceSession(notice);
+    }
   };
+
+  if (session && sessionStatus !== "ready") {
+    return (
+      <main className="session-restore-shell">
+        <div className="paper-noise" aria-hidden="true" />
+        <section className="session-restore-card" aria-labelledby="session-restore-title">
+          <span className="status-chip">Secure session</span>
+          <p className="section-index">Checking access</p>
+          <h1 id="session-restore-title">
+            {sessionStatus === "checking" ? "Restoring your workspace…" : "Workspace unavailable"}
+          </h1>
+          <p className="muted-copy" role={sessionStatus === "unavailable" ? "alert" : "status"}>
+            {sessionStatus === "checking"
+              ? "Validating your saved session before loading private project data."
+              : sessionNotice}
+          </p>
+          {sessionStatus === "unavailable" ? (
+            <div className="session-restore-actions">
+              <button
+                className="primary-action"
+                type="button"
+                onClick={() => setSessionStatus("checking")}
+              >
+                <span>Try again</span><span aria-hidden="true">↗</span>
+              </button>
+              <button className="text-action" type="button" onClick={handleLogout}>
+                Sign out
+              </button>
+            </div>
+          ) : null}
+        </section>
+      </main>
+    );
+  }
 
   if (!session) {
     return (
@@ -688,20 +839,79 @@ export default function App({ client = apiClient }) {
           <div className="login-card">
             <span className="status-chip">Local workspace</span>
             <p className="section-index">01 / Access</p>
-            <h1 id="login-title">Enter the project workshop</h1>
+            <h1 id="login-title">
+              {authMode === "login" ? "Enter the project workshop" : "Create your workspace"}
+            </h1>
             <p className="muted-copy">
-              Sign in to turn a plain-language brief into an editable first backlog.
+              {authMode === "login"
+                ? "Sign in to turn a plain-language brief into an editable first backlog."
+                : "Create an account, then start with a blank project or an AI-assisted plan."}
             </p>
 
-            <form className="stacked-form" onSubmit={handleLogin}>
+            <div className="auth-mode-switch" aria-label="Choose account access mode">
+              <button
+                type="button"
+                aria-pressed={authMode === "login"}
+                onClick={() => selectAuthMode("login")}
+              >
+                Sign in
+              </button>
+              <button
+                type="button"
+                aria-pressed={authMode === "register"}
+                onClick={() => selectAuthMode("register")}
+              >
+                Create account
+              </button>
+            </div>
+
+            <form
+              className="stacked-form"
+              onSubmit={authMode === "login" ? handleLogin : handleRegister}
+            >
+              {authMode === "register" ? (
+                <>
+                  <div className="field-group">
+                    <label htmlFor="fullName">Full name</label>
+                    <input
+                      id="fullName"
+                      name="fullName"
+                      autoComplete="name"
+                      maxLength={100}
+                      value={registration.fullName}
+                      onChange={handleRegistrationChange}
+                      placeholder="Pablo Marotta"
+                      required
+                    />
+                  </div>
+                  <div className="field-group">
+                    <label htmlFor="email">Email</label>
+                    <input
+                      id="email"
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      maxLength={255}
+                      value={registration.email}
+                      onChange={handleRegistrationChange}
+                      placeholder="you@example.com"
+                      required
+                    />
+                  </div>
+                </>
+              ) : null}
               <div className="field-group">
                 <label htmlFor="username">Username</label>
                 <input
                   id="username"
                   name="username"
                   autoComplete="username"
-                  value={credentials.username}
-                  onChange={handleCredentialChange}
+                  minLength={authMode === "register" ? 3 : undefined}
+                  maxLength={50}
+                  value={authMode === "login" ? credentials.username : registration.username}
+                  onChange={authMode === "login"
+                    ? handleCredentialChange
+                    : handleRegistrationChange}
                   placeholder="pablo-local"
                   required
                 />
@@ -713,26 +923,39 @@ export default function App({ client = apiClient }) {
                   id="password"
                   name="password"
                   type="password"
-                  autoComplete="current-password"
-                  value={credentials.password}
-                  onChange={handleCredentialChange}
-                  placeholder="Your local test password"
+                  autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                  minLength={authMode === "register" ? 8 : undefined}
+                  maxLength={72}
+                  value={authMode === "login" ? credentials.password : registration.password}
+                  onChange={authMode === "login"
+                    ? handleCredentialChange
+                    : handleRegistrationChange}
+                  placeholder={authMode === "login"
+                    ? "Your password"
+                    : "At least 8 characters"}
                   required
                 />
               </div>
 
+              {sessionNotice ? <p className="error-banner" role="alert">{sessionNotice}</p> : null}
               {error ? <p className="error-banner" role="alert">{error}</p> : null}
               <button
                 className="primary-action"
                 type="submit"
-                disabled={phase === "logging-in"}
-                aria-busy={phase === "logging-in"}
+                disabled={phase === "logging-in" || phase === "registering"}
+                aria-busy={phase === "logging-in" || phase === "registering"}
               >
-                <span>{phase === "logging-in" ? "Signing in…" : "Enter workshop"}</span>
+                <span>
+                  {authMode === "login"
+                    ? phase === "logging-in" ? "Signing in…" : "Enter workshop"
+                    : phase === "registering" ? "Creating account…" : "Create my workspace"}
+                </span>
                 <span aria-hidden="true">↗</span>
               </button>
             </form>
-            <p className="local-note">Credentials stay in this browser session only.</p>
+            <p className="local-note">
+              Access stays in this tab. A protected HttpOnly cookie renews it when needed.
+            </p>
           </div>
         </section>
       </main>
@@ -788,8 +1011,14 @@ export default function App({ client = apiClient }) {
               Account
             </button>
           </nav>
-          <button className="text-action" type="button" onClick={handleLogout}>
-            Log out <span aria-hidden="true">↗</span>
+          <button
+            className="text-action"
+            type="button"
+            onClick={handleLogout}
+            disabled={phase === "logging-out"}
+          >
+            {phase === "logging-out" ? "Signing out…" : "Log out"}{" "}
+            <span aria-hidden="true">↗</span>
           </button>
         </div>
       </header>
@@ -857,7 +1086,11 @@ export default function App({ client = apiClient }) {
           onRetry={handleOpenMyWork}
         />
       ) : activeView === "account" ? (
-        <AccountSection user={session.user} onLogout={handleLogout} />
+        <AccountSection
+          user={session.user}
+          onLogout={handleLogout}
+          loggingOut={phase === "logging-out"}
+        />
       ) : (
         <>
       <section className="prompt-stage" aria-labelledby="prompt-title">

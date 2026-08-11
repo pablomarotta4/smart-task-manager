@@ -25,8 +25,58 @@ describe("project API client", () => {
       "http://api.test/api/auth/login",
       expect.objectContaining({
         method: "POST",
+        credentials: "include",
         body: JSON.stringify({ username: "pablo-local", password: "secret" }),
       }),
+    );
+  });
+
+  it("registers a new account and supports session lifecycle requests", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ token: "new-token", user: { username: "new-user" } }, 201))
+      .mockResolvedValueOnce(jsonResponse({ username: "new-user" }))
+      .mockResolvedValueOnce(jsonResponse({ token: "renewed-token", user: { username: "new-user" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+    const account = {
+      fullName: "New User",
+      email: "new@example.com",
+      username: "new-user",
+      password: "password123",
+    };
+
+    await client.register(account);
+    await client.getCurrentUser({ token: "new-token" });
+    await client.refreshSession();
+    await client.logout();
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/auth/register",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify(account),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/auth/me",
+      expect.objectContaining({
+        method: "GET",
+        credentials: "include",
+        headers: expect.objectContaining({ Authorization: "Bearer new-token" }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "http://api.test/api/auth/refresh",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      4,
+      "http://api.test/api/auth/logout",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
     );
   });
 

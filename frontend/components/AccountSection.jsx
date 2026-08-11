@@ -1,4 +1,4 @@
-export default function AccountSection({ user, onLogout }) {
+export default function AccountSection({ user, onLogout, loggingOut = false }) {
   const displayName = user.fullName || user.username;
 
   return (
@@ -49,8 +49,15 @@ export default function AccountSection({ user, onLogout }) {
             Signing out clears the local session token. Your saved projects and tickets
             remain in the workspace.
           </p>
-          <button className="primary-action" type="button" onClick={onLogout}>
-            <span>Sign out of workspace</span><span aria-hidden="true">↗</span>
+          <button
+            className="primary-action"
+            type="button"
+            onClick={onLogout}
+            disabled={loggingOut}
+            aria-busy={loggingOut}
+          >
+            <span>{loggingOut ? "Signing out…" : "Sign out of workspace"}</span>
+            <span aria-hidden="true">↗</span>
           </button>
         </article>
       </div>

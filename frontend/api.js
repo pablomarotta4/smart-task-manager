@@ -1,5 +1,5 @@
 const DEFAULT_API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8080";
+  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
 export class ApiError extends Error {
   constructor(message, { status, details } = {}) {
@@ -29,6 +29,7 @@ export const createApiClient = ({
     try {
       const requestOptions = {
         method,
+        credentials: "include",
         headers: {
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -57,6 +58,10 @@ export const createApiClient = ({
 
   return {
     login: (credentials) => request("/api/auth/login", { body: credentials }),
+    register: (account) => request("/api/auth/register", { body: account }),
+    getCurrentUser: ({ token }) => request("/api/auth/me", { method: "GET", token }),
+    refreshSession: () => request("/api/auth/refresh"),
+    logout: () => request("/api/auth/logout"),
     generateProject: ({ token, prompt }) =>
       request("/api/project-generation-runs", { token, body: { prompt } }),
     generateTaskPlan: ({ token, projectId, taskId, prompt }) =>

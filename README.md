@@ -80,8 +80,8 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. Sign in with an existing local account, describe a project, review the
-quality evidence, edit the proposed project and tickets, and confirm when the draft is ready.
+Open `http://localhost:3000`. Create an account or sign in, describe a project, review the quality
+evidence, edit the proposed project and tickets, and confirm when the draft is ready.
 
 The authenticated workspace includes:
 
@@ -89,12 +89,14 @@ The authenticated workspace includes:
 - **Projects** for browsing saved projects and their ordered ticket details.
 - **Board** for viewing project progress and editing ticket status, priority, copy, and due date.
 - **My work** for a cross-project focus, blocked, and due-next queue.
-- **Account** for reviewing the current local identity and clearing the browser session.
+- **Account** for reviewing the current identity and revoking the renewable browser session.
 
 Draft generation does not persist projects or tickets until confirmation. Ticket edits made from the
-Board or My work are saved immediately. AI follow-up planning opens a separate Workshop brief; it does
-not update the existing project because project mutation is not part of the current API. Set
-`VITE_API_BASE_URL` to override the default Spring URL, `http://127.0.0.1:8080`.
+Board or My work are saved immediately. Project owners can also open **Plan with AI** on an existing
+ticket, edit the contextual draft, and explicitly confirm the refined ticket and its child tickets.
+Set `VITE_API_BASE_URL` to override the default Spring URL, `http://localhost:8080`. Keep the frontend
+and API on the same hostname locally (`localhost` by default) so the strict refresh cookie remains
+same-site.
 
 Useful configuration:
 
@@ -103,10 +105,30 @@ Useful configuration:
 - `AI_PLANNING_READ_TIMEOUT_MS` defaults to `180000`.
 - `SMART_TASK_AI_OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434`.
 - `SMART_TASK_AI_OLLAMA_MODEL` defaults to `llama3.2:3b`.
+- `JWT_EXPIRATION_MS` defaults to `900000` (15 minutes).
+- `JWT_REFRESH_EXPIRATION_MS` defaults to `604800000` (7 days).
+- `CORS_ALLOWED_ORIGINS` defaults to the local Vite origins on `localhost` and `127.0.0.1`.
+
+For a production-profile deployment, set a unique `JWT_SECRET` of at least 32 bytes and an explicit
+comma-separated `CORS_ALLOWED_ORIGINS`. `application-prod.yaml` has no secret or origin fallback and
+forces secure refresh cookies:
+
+```bash
+SPRING_PROFILES_ACTIVE=prod \
+JWT_SECRET='replace-with-at-least-32-random-bytes' \
+CORS_ALLOWED_ORIGINS='https://tasks.example.com' \
+java -jar target/smart-task-manager-0.0.1-SNAPSHOT.jar
+```
+
+Access tokens are kept in `sessionStorage`. Login and registration also issue a rotating opaque refresh
+token in an HttpOnly, same-site cookie; only its SHA-256 digest is stored in PostgreSQL. Logout revokes
+that token and expires the cookie. Existing access tokens remain valid until their short expiry.
 
 ## Generate a project
 
-First register or log in through `/api/auth/**` and use the returned bearer token.
+First register or log in through the frontend (or `/api/auth/register` and `/api/auth/login`) and use
+the returned bearer token. The browser automatically uses `/api/auth/refresh`, `/api/auth/me`, and
+`/api/auth/logout` for session continuity and revocation.
 
 Create a draft (this does not create a project or tickets):
 
