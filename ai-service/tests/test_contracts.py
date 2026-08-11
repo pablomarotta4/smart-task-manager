@@ -46,6 +46,33 @@ def test_accepts_a_strict_versioned_request_and_project_draft() -> None:
     assert len(draft().tickets) == 3
 
 
+def test_accepts_a_three_character_brief() -> None:
+    request = PlanningRequest(contract_version="v1", run_id=uuid4(), prompt="CRM")
+
+    assert request.prompt == "CRM"
+
+
+def test_accepts_at_most_three_non_blocking_open_questions() -> None:
+    project_draft = draft().model_copy(
+        update={
+            "open_questions": [
+                "Is this for one household or several?",
+                "Should the first release import bank transactions?",
+                "Which currency should the first release support?",
+            ]
+        }
+    )
+
+    validated = ProjectDraft.model_validate(project_draft.model_dump())
+
+    assert len(validated.open_questions) == 3
+
+    invalid = project_draft.model_dump()
+    invalid["open_questions"].append("Should budgets be shared?")
+    with pytest.raises(ValidationError, match="at most 3"):
+        ProjectDraft.model_validate(invalid)
+
+
 def test_accepts_existing_task_context_and_rejects_an_unknown_selected_task() -> None:
     context = PlanningContext(
         mode="EXISTING_TASK",
@@ -88,7 +115,7 @@ def test_accepts_existing_task_context_and_rejects_an_unknown_selected_task() ->
     ("field", "value"),
     [
         ("contract_version", "v2"),
-        ("prompt", "short"),
+        ("prompt", "no"),
         ("unexpected", True),
     ],
 )

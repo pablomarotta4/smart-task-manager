@@ -14,6 +14,7 @@ from smart_task_ai.contracts import (
     TicketDraft,
 )
 from smart_task_ai.planner import ProjectPlanner
+from smart_task_ai.prompts import PLANNER_SYSTEM_PROMPT, generation_prompt
 
 
 def ticket(client_id: str, title: str, *, rich: bool = True) -> TicketDraft:
@@ -58,6 +59,16 @@ def good_plan(prefix: str = "") -> ProjectDraft:
             ticket(f"{prefix}supplies", "Track communal garden supplies"),
         ]
     )
+
+
+def test_minimal_input_prompt_generates_immediately_with_visible_uncertainty() -> None:
+    user_prompt = generation_prompt("CRM")
+
+    assert "Create the first actionable project plan" in user_prompt
+    assert "Do not stop to ask questions before creating the draft" in PLANNER_SYSTEM_PROMPT
+    assert "conservative product assumptions" in PLANNER_SYSTEM_PROMPT
+    assert "open questions" in PLANNER_SYSTEM_PROMPT
+    assert "Do not choose a technology stack" in PLANNER_SYSTEM_PROMPT
 
 
 def repetitive_plan() -> ProjectDraft:

@@ -14,6 +14,9 @@ Description = Annotated[
 Criterion = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=10, max_length=500)
 ]
+OpenQuestion = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=10, max_length=255)
+]
 ClientId = Annotated[
     str,
     StringConstraints(
@@ -67,6 +70,9 @@ class ProjectDraft(ContractModel):
     objective: Description
     assumptions: Annotated[list[ShortText], Field(max_length=10)] = Field(default_factory=list)
     risks: Annotated[list[ShortText], Field(max_length=10)] = Field(default_factory=list)
+    open_questions: Annotated[list[OpenQuestion], Field(max_length=3)] = Field(
+        default_factory=list
+    )
     tickets: Annotated[list[TicketDraft], Field(min_length=3, max_length=12)]
 
     @model_validator(mode="after")
@@ -155,7 +161,7 @@ class PlanningContext(ContractModel):
 class PlanningRequest(ContractModel):
     contract_version: Literal["v1"]
     run_id: UUID
-    prompt: Annotated[str, StringConstraints(min_length=10, max_length=4_000)]
+    prompt: Annotated[str, StringConstraints(min_length=3, max_length=4_000)]
     context: PlanningContext | None = None
 
 
