@@ -16,6 +16,7 @@ from smart_task_ai.contracts import (
     TicketDraft,
 )
 from smart_task_ai.ollama import ProviderResponseError, ProviderTimeout
+from smart_task_ai.providers import ProviderReadiness
 
 
 def response_for(run_id: UUID) -> PlanningResponse:
@@ -84,6 +85,16 @@ class FakePlanner:
         return response_for(run_id)
 
 
+@dataclass
+class FakeReadinessProbe:
+    result: ProviderReadiness
+    calls: int = 0
+
+    async def check_readiness(self) -> ProviderReadiness:
+        self.calls += 1
+        return self.result
+
+
 async def test_health_endpoint_is_ready_without_calling_model() -> None:
     app = create_app(planner=FakePlanner())
     async with httpx.AsyncClient(
@@ -93,6 +104,46 @@ async def test_health_endpoint_is_ready_without_calling_model() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+async def test_ready_endpoint_checks_the_configured_model() -> None:
+    probe = FakeReadinessProbe(ProviderReadiness(ready=True, model="gemma3:4b", reason="ready"))
+    app = create_app(planner=FakePlanner(), readiness_probe=probe)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "model": "gemma3:4b",
+        "reason": "ready",
+    }
+    assert probe.calls == 1
+
+
+async def test_ready_endpoint_reports_a_missing_model_without_provider_details() -> None:
+    probe = FakeReadinessProbe(
+        ProviderReadiness(
+            ready=False,
+            model="llama3.2:3b",
+            reason="configured_model_missing",
+        )
+    )
+    app = create_app(planner=FakePlanner(), readiness_probe=probe)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "model": "llama3.2:3b",
+        "reason": "configured_model_missing",
+    }
+    assert "ollama" not in response.text.lower()
 
 
 async def test_creates_versioned_project_plan() -> None:

@@ -15,6 +15,7 @@ from smart_task_ai.contracts import (
 )
 from smart_task_ai.planner import ProjectPlanner
 from smart_task_ai.prompts import PLANNER_SYSTEM_PROMPT, generation_prompt
+from smart_task_ai.providers import ModelCallMetadata
 
 
 def ticket(client_id: str, title: str, *, rich: bool = True) -> TicketDraft:
@@ -86,8 +87,18 @@ class ScriptedModel:
     responses: Sequence[ProjectDraft]
     model_name: str = "scripted-test-model"
     calls: list[tuple[str, str]] = field(default_factory=lambda: list[tuple[str, str]]())
+    metadata_calls: list[ModelCallMetadata | None] = field(
+        default_factory=lambda: list[ModelCallMetadata | None]()
+    )
 
-    async def generate(self, *, system_prompt: str, user_prompt: str) -> ProjectDraft:
+    async def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: ModelCallMetadata | None = None,
+    ) -> ProjectDraft:
+        self.metadata_calls.append(metadata)
         self.calls.append((system_prompt, user_prompt))
         index = min(len(self.calls) - 1, len(self.responses) - 1)
         return self.responses[index]
@@ -97,8 +108,18 @@ class ScriptedModel:
 class ScriptedBriefAnalyzer:
     responses: Sequence[BriefAnalysis]
     calls: list[tuple[str, str]] = field(default_factory=lambda: list[tuple[str, str]]())
+    metadata_calls: list[ModelCallMetadata | None] = field(
+        default_factory=lambda: list[ModelCallMetadata | None]()
+    )
 
-    async def analyze(self, *, system_prompt: str, user_prompt: str) -> BriefAnalysis:
+    async def analyze(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: ModelCallMetadata | None = None,
+    ) -> BriefAnalysis:
+        self.metadata_calls.append(metadata)
         self.calls.append((system_prompt, user_prompt))
         index = min(len(self.calls) - 1, len(self.responses) - 1)
         return self.responses[index]
@@ -107,14 +128,16 @@ class ScriptedBriefAnalyzer:
 async def test_adequate_first_output_finishes_without_revision() -> None:
     model = ScriptedModel([good_plan()])
     planner = ProjectPlanner(model)
+    run_id = uuid4()
 
-    result = await planner.plan(run_id=uuid4(), prompt="Build a community garden planner")
+    result = await planner.plan(run_id=run_id, prompt="Build a community garden planner")
 
     assert result.quality.passed is True
     assert result.revision_count == 0
     assert result.draft == good_plan()
     assert len(model.calls) == 1
     assert "Every explicitly requested capability" in model.calls[0][0]
+    assert model.metadata_calls == [ModelCallMetadata(run_id=run_id, phase="generation")]
 
 
 async def test_repetitive_output_is_revised_once_with_quality_feedback() -> None:
@@ -129,6 +152,10 @@ async def test_repetitive_output_is_revised_once_with_quality_feedback() -> None
     assert len(model.calls) == 2
     assert "duplicate_titles" in model.calls[1][1]
     assert "thin_descriptions" in model.calls[1][1]
+    assert [metadata.phase for metadata in model.metadata_calls if metadata] == [
+        "generation",
+        "revision",
+    ]
 
 
 async def test_persistently_weak_output_stops_after_one_revision() -> None:
@@ -165,6 +192,8 @@ async def test_brief_analysis_feeds_mandatory_capabilities_to_generation() -> No
     assert result.revision_count == 0
     assert len(model.calls) == 1
     assert len(analyzer.calls) == 1
+    assert analyzer.metadata_calls[0] is not None
+    assert analyzer.metadata_calls[0].phase == "brief_analysis"
     assert "Mandatory explicit capability checklist" in model.calls[0][1]
     assert "assign members to garden plots" in model.calls[0][1]
     assert "track communal garden supplies" in model.calls[0][1]

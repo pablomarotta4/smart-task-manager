@@ -20,7 +20,7 @@ from smart_task_ai.prompts import (
     generation_prompt,
     revision_prompt,
 )
-from smart_task_ai.providers import BriefAnalyzer, PlanningModel
+from smart_task_ai.providers import BriefAnalyzer, ModelCallMetadata, PlanningModel
 from smart_task_ai.quality import evaluate_draft, find_missing_capabilities
 
 
@@ -31,6 +31,7 @@ class PlanningState(TypedDict, total=False):
     revision_count: int
     explicit_capabilities: list[str]
     context: PlanningContext | None
+    run_id: UUID
 
 
 class ProjectPlanner:
@@ -70,7 +71,8 @@ class ProjectPlanner:
 
     async def _analyze(self, state: PlanningState) -> PlanningState:
         prompt = state.get("prompt")
-        if prompt is None or self._brief_analyzer is None:
+        run_id = state.get("run_id")
+        if prompt is None or run_id is None or self._brief_analyzer is None:
             raise RuntimeError("planning graph cannot analyze a missing brief")
         context = state.get("context")
         if context is not None:
@@ -80,6 +82,7 @@ class ProjectPlanner:
         analysis = await self._brief_analyzer.analyze(
             system_prompt=BRIEF_ANALYSIS_SYSTEM_PROMPT,
             user_prompt=brief_analysis_prompt(prompt),
+            metadata=ModelCallMetadata(run_id=run_id, phase="brief_analysis"),
         )
         return PlanningState(explicit_capabilities=analysis.explicit_capabilities)
 
@@ -93,7 +96,12 @@ class ProjectPlanner:
         final_state = cast(
             PlanningState,
             await self._graph.ainvoke(
-                PlanningState(prompt=prompt, revision_count=0, context=context)
+                PlanningState(
+                    prompt=prompt,
+                    revision_count=0,
+                    context=context,
+                    run_id=run_id,
+                )
             ),
         )
         draft = final_state.get("draft")
@@ -110,7 +118,8 @@ class ProjectPlanner:
 
     async def _generate(self, state: PlanningState) -> PlanningState:
         prompt = state.get("prompt")
-        if prompt is None:
+        run_id = state.get("run_id")
+        if prompt is None or run_id is None:
             raise RuntimeError("planning graph requires a prompt")
         context = state.get("context")
         system_prompt = TASK_PLANNER_SYSTEM_PROMPT if context is not None else PLANNER_SYSTEM_PROMPT
@@ -122,6 +131,7 @@ class ProjectPlanner:
                 context,
                 max_input_tokens=self._max_input_tokens,
             ),
+            metadata=ModelCallMetadata(run_id=run_id, phase="generation"),
         )
         return PlanningState(draft=draft)
 
@@ -170,7 +180,8 @@ class ProjectPlanner:
         prompt = state.get("prompt")
         draft = state.get("draft")
         quality = state.get("quality")
-        if prompt is None or draft is None or quality is None:
+        run_id = state.get("run_id")
+        if prompt is None or draft is None or quality is None or run_id is None:
             raise RuntimeError("planning graph cannot revise incomplete state")
         draft = await self._model.generate(
             system_prompt=(
@@ -186,6 +197,7 @@ class ProjectPlanner:
                 state.get("context"),
                 max_input_tokens=self._max_input_tokens,
             ),
+            metadata=ModelCallMetadata(run_id=run_id, phase="revision"),
         )
         return PlanningState(draft=draft, revision_count=state.get("revision_count", 0) + 1)
 

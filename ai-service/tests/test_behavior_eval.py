@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from smart_task_ai.contracts import Priority, ProjectDraft, TicketDraft
 from smart_task_ai.evaluation import EvaluationCase, ExpectedConcept, evaluate_cases
 from smart_task_ai.planner import ProjectPlanner
+from smart_task_ai.providers import ModelCallMetadata
 
 
 def ticket(client_id: str, title: str, *, rich: bool = True) -> TicketDraft:
@@ -70,8 +71,14 @@ class ScriptedModel:
     model_name: str = "behavior-fixture"
     call_count: int = 0
 
-    async def generate(self, *, system_prompt: str, user_prompt: str) -> ProjectDraft:
-        del system_prompt, user_prompt
+    async def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: ModelCallMetadata | None = None,
+    ) -> ProjectDraft:
+        del system_prompt, user_prompt, metadata
         index = min(self.call_count, len(self.responses) - 1)
         self.call_count += 1
         return self.responses[index]
