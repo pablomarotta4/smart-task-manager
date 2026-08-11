@@ -20,12 +20,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-import com.pablomarotta.smart_task_manager.exception.TaskNotFoundException;
-import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
-import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -42,7 +40,7 @@ public class TaskService {
     private final TaskDependencyRepository dependencyRepository;
 
     @Transactional
-    public TaskResponse createTask(TaskRequest taskRequest) {
+    public TaskResponse createTask(TaskRequest taskRequest, String username) {
         if (taskRequest == null) {
             throw new IllegalArgumentException("Task request cannot be null");
         }
@@ -52,7 +50,7 @@ public class TaskService {
         }
         
         try {
-            var project = projectRepository.findById(taskRequest.getProjectId())
+            var project = projectRepository.findByIdAndOwnerUsername(taskRequest.getProjectId(), username)
                     .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + taskRequest.getProjectId()));
 
             AIClassificationRequest aiRequest = AIClassificationRequest.builder()
@@ -117,14 +115,22 @@ public class TaskService {
         return taskResponse;
     }
 
-    public List<TaskResponse> getAllTasks() {
-        return taskRepository.findAll().stream()
+    public List<TaskResponse> getAllTasks(String username) {
+        return taskRepository.findByProjectOwnerUsername(username).stream()
                 .map(this::mapToResponse)
                 .toList();
     }
 
-    public List<UserResponse> getAllUsersInProject(Long projectId) {
-        return userRepository.findAll().stream()
+    public List<UserResponse> getAllUsersInProject(Long projectId, String username) {
+        var project = getOwnedProject(projectId, username);
+        Map<Long, com.pablomarotta.smart_task_manager.model.User> projectUsers = new LinkedHashMap<>();
+        projectUsers.put(project.getOwner().getId(), project.getOwner());
+        taskRepository.findByProjectIdOrderByPositionAsc(projectId).stream()
+                .map(Task::getAssignee)
+                .filter(assignee -> assignee != null)
+                .forEach(assignee -> projectUsers.putIfAbsent(assignee.getId(), assignee));
+
+        return projectUsers.values().stream()
                 .map(this::mapUserToResponse)
                 .toList();
     }
@@ -138,7 +144,9 @@ public class TaskService {
     }
 
     @Transactional(readOnly = true)
-    public List<TaskResponse> getTasksByProjectId(Long projectId) {
+    public List<TaskResponse> getTasksByProjectId(Long projectId, String username) {
+        getOwnedProject(projectId, username);
+
         Map<Long, List<String>> acceptanceCriteria = acceptanceCriterionRepository
                 .findByProjectId(projectId)
                 .stream()
@@ -183,50 +191,45 @@ public class TaskService {
         return response;
     }
 
-    public List<TaskResponse> getTasksByUserId(Long userId) {
-        return taskRepository.findByAssigneeId(userId).stream()
+    public List<TaskResponse> getTasksByUserId(Long userId, String username) {
+        return taskRepository.findByAssigneeIdAndProjectOwnerUsername(userId, username).stream()
                 .map(this::mapToResponse)
                 .toList();
     }
 
-    public List<TaskResponse> getInProgressTask(){
-        return taskRepository.findByStatus(Status.IN_PROGRESS).stream()
+    public List<TaskResponse> getInProgressTask(String username){
+        return getTasksByStatus(Status.IN_PROGRESS, username);
+    }
+
+    public List<TaskResponse> getTodoTasks(String username){
+        return getTasksByStatus(Status.TODO, username);
+    }
+
+    public List<TaskResponse> getDoneTasks(String username){
+        return getTasksByStatus(Status.DONE, username);
+    }
+
+    public List<TaskResponse> getBlockedTasks(String username){
+        return getTasksByStatus(Status.BLOCKED, username);
+    }
+
+    public List<TaskResponse> getCancelledTasks(String username){
+        return getTasksByStatus(Status.CANCELLED, username);
+    }
+
+    private List<TaskResponse> getTasksByStatus(Status status, String username) {
+        return taskRepository.findByStatusAndProjectOwnerUsername(status, username).stream()
                 .map(this::mapToResponse)
                 .toList();
     }
 
-    public List<TaskResponse> getTodoTasks(){
-        return taskRepository.findByStatus(Status.TODO).stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
-
-    public List<TaskResponse> getDoneTasks(){
-        return taskRepository.findByStatus(Status.DONE).stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
-
-    public List<TaskResponse> getBlockedTasks(){
-        return taskRepository.findByStatus(Status.BLOCKED).stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
-
-    public List<TaskResponse> getCancelledTasks(){
-        return taskRepository.findByStatus(Status.CANCELLED).stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
-
-    public TaskResponse getTaskById(Long id) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+    public TaskResponse getTaskById(Long id, String username) {
+        Task task = getOwnedTask(id, username);
         return mapToResponse(task);
     }
 
     @Transactional
-    public TaskResponse updateTask(Long id, TaskRequest taskRequest) {
+    public TaskResponse updateTask(Long id, TaskRequest taskRequest, String username) {
         if (id == null) {
             throw new IllegalArgumentException("Task ID cannot be null");
         }
@@ -235,8 +238,7 @@ public class TaskService {
         }
         
         try {
-            Task task = taskRepository.findById(id)
-                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+            Task task = getOwnedTask(id, username);
 
             if (taskRequest.getTitle() != null) {
                 task.setTitle(validateTitle(taskRequest.getTitle()));
@@ -266,14 +268,13 @@ public class TaskService {
     }
 
     @Transactional
-    public void deleteTask(Long id) {
+    public void deleteTask(Long id, String username) {
         if (id == null) {
             throw new IllegalArgumentException("Task ID cannot be null");
         }
         
         try {
-            Task task = taskRepository.findById(id)
-                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+            Task task = getOwnedTask(id, username);
             taskRepository.delete(task);
         } catch (DataAccessException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete task: " + e.getMessage(), e);
@@ -281,7 +282,7 @@ public class TaskService {
     }
 
     @Transactional
-    public TaskResponse updateTaskStatus(Long id, Status status) {
+    public TaskResponse updateTaskStatus(Long id, Status status, String username) {
         if (id == null) {
             throw new IllegalArgumentException("Task ID cannot be null");
         }
@@ -290,8 +291,7 @@ public class TaskService {
         }
         
         try {
-            Task task = taskRepository.findById(id)
-                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+            Task task = getOwnedTask(id, username);
 
             task.setStatus(status);
 
@@ -308,14 +308,13 @@ public class TaskService {
     }
 
     @Transactional
-    public TaskResponse assignTask(Long taskId, Long userId) {
+    public TaskResponse assignTask(Long taskId, Long userId, String username) {
         if (taskId == null) {
             throw new IllegalArgumentException("Task ID cannot be null");
         }
         
         try {
-            Task task = taskRepository.findById(taskId)
-                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
+            Task task = getOwnedTask(taskId, username);
 
             if (userId != null) {
                 com.pablomarotta.smart_task_manager.model.User user = userRepository.findById(userId)
@@ -334,7 +333,7 @@ public class TaskService {
     }
 
     @Transactional
-    public TaskResponse updateTaskPriority(Long id, Priority priority) {
+    public TaskResponse updateTaskPriority(Long id, Priority priority, String username) {
         if (id == null) {
             throw new IllegalArgumentException("Task ID cannot be null");
         }
@@ -343,8 +342,7 @@ public class TaskService {
         }
         
         try {
-            Task task = taskRepository.findById(id)
-                    .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + id));
+            Task task = getOwnedTask(id, username);
 
             task.setPriority(priority);
             Task updatedTask = taskRepository.save(task);
@@ -353,6 +351,16 @@ public class TaskService {
         } catch (DataAccessException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to update task priority: " + e.getMessage(), e);
         }
+    }
+
+    private com.pablomarotta.smart_task_manager.model.Project getOwnedProject(Long projectId, String username) {
+        return projectRepository.findByIdAndOwnerUsername(projectId, username)
+                .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + projectId));
+    }
+
+    private Task getOwnedTask(Long taskId, String username) {
+        return taskRepository.findByIdAndProjectOwnerUsername(taskId, username)
+                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
     }
     
     // Validation helper methods

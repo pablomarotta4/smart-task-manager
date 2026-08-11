@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -26,7 +27,15 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     List<Task> findByAssigneeId(Long assigneeId);
 
+    List<Task> findByAssigneeIdAndProjectOwnerUsername(Long assigneeId, String username);
+
     List<Task> findByStatus(Status status);
+
+    List<Task> findByStatusAndProjectOwnerUsername(Status status, String username);
+
+    List<Task> findByProjectOwnerUsername(String username);
+
+    Optional<Task> findByIdAndProjectOwnerUsername(Long id, String username);
 
     List<Task> findByPriority(Priority priority);
 

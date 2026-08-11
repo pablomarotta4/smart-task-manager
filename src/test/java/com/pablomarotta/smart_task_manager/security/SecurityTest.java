@@ -63,7 +63,7 @@ class SecurityTest {
         when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
         when(jwtTokenProvider.getUsernameFromToken("valid-token")).thenReturn("testuser");
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(userDetails);
-        when(taskService.getAllTasks()).thenReturn(Collections.emptyList());
+        when(taskService.getAllTasks("testuser")).thenReturn(Collections.emptyList());
 
         mockMvc.perform(get("/api/tasks/alltasks")
                 .header("Authorization", "Bearer valid-token"))
