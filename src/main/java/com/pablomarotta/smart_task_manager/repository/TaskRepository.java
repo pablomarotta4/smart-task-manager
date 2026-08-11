@@ -5,6 +5,7 @@ import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -38,6 +39,8 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     Optional<Task> findByIdAndProjectOwnerUsername(Long id, String username);
 
+    Optional<Task> findByIdAndAssigneeUsername(Long id, String username);
+
     List<Task> findByPriority(Priority priority);
 
     List<Task> findByProjectIdAndStatus(Long projectId, Status status);
@@ -49,6 +52,17 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     List<Task> findByGenerationRunIdOrderByPositionAsc(UUID generationRunId);
 
     long countByProjectId(Long projectId);
+
+    @Modifying
+    @Query("""
+            update Task task
+            set task.assignee = null
+            where task.project.id = :projectId and task.assignee.id = :userId
+            """)
+    int clearAssigneeForProjectAndUser(
+            @Param("projectId") Long projectId,
+            @Param("userId") Long userId
+    );
 
     @Query("""
             select task.project.id as projectId, count(task.id) as taskCount

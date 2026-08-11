@@ -8,6 +8,7 @@ import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
+import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,6 +38,7 @@ public class TaskService {
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
     private final ProjectRepository projectRepository;
+    private final ProjectMembershipRepository membershipRepository;
     private final TaskAcceptanceCriterionRepository acceptanceCriterionRepository;
     private final TaskDependencyRepository dependencyRepository;
 
@@ -67,9 +71,7 @@ public class TaskService {
                             : validatePosition(taskRequest.getPosition()));
 
             if (taskRequest.getAssigneeId() != null) {
-                var assignee = userRepository.findById(taskRequest.getAssigneeId())
-                        .orElseThrow(() -> new UserNotFoundException("User not found with id: " + taskRequest.getAssigneeId()));
-                taskBuilder.assignee(assignee);
+                taskBuilder.assignee(getActiveProjectMember(project.getId(), taskRequest.getAssigneeId()));
             }
 
             Task task = taskBuilder.build();
@@ -228,7 +230,7 @@ public class TaskService {
     }
 
     public TaskResponse getTaskById(Long id, String username) {
-        Task task = getOwnedTask(id, username);
+        Task task = getEditableTask(id, username);
         return mapToResponse(task);
     }
 
@@ -242,7 +244,7 @@ public class TaskService {
         }
         
         try {
-            Task task = getOwnedTask(id, username);
+            Task task = getEditableTask(id, username);
             if (!task.getProject().getId().equals(taskRequest.getProjectId())) {
                 throw new IllegalArgumentException("Task cannot be moved to another project");
             }
@@ -253,6 +255,7 @@ public class TaskService {
             applyStatus(task, taskRequest.getStatus());
             task.setPriority(taskRequest.getPriority());
             task.setCategory(normalizeOptionalText(taskRequest.getCategory()));
+            applyAssignment(task, taskRequest.getAssigneeId(), username);
             if (taskRequest.getPosition() != null) {
                 task.setPosition(validatePosition(taskRequest.getPosition()));
             }
@@ -289,7 +292,7 @@ public class TaskService {
         }
         
         try {
-            Task task = getOwnedTask(id, username);
+            Task task = getEditableTask(id, username);
 
             applyStatus(task, status);
 
@@ -311,9 +314,7 @@ public class TaskService {
             Task task = getOwnedTask(taskId, username);
 
             if (userId != null) {
-                com.pablomarotta.smart_task_manager.model.User user = userRepository.findById(userId)
-                        .orElseThrow(() -> new UserNotFoundException("User not found with id: " + userId));
-                task.setAssignee(user);
+                task.setAssignee(getActiveProjectMember(task.getProject().getId(), userId));
             } else {
                 task.setAssignee(null);
             }
@@ -355,6 +356,41 @@ public class TaskService {
     private Task getOwnedTask(Long taskId, String username) {
         return taskRepository.findByIdAndProjectOwnerUsername(taskId, username)
                 .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
+    }
+
+    private Task getEditableTask(Long taskId, String username) {
+        return taskRepository.findByIdAndProjectOwnerUsername(taskId, username)
+                .or(() -> taskRepository.findByIdAndAssigneeUsername(taskId, username))
+                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
+    }
+
+    private void applyAssignment(Task task, Long assigneeId, String username) {
+        boolean owner = task.getProject().getOwner().getUsername().equals(username);
+        Long currentAssigneeId = task.getAssignee() == null ? null : task.getAssignee().getId();
+        if (!owner) {
+            if (!Objects.equals(currentAssigneeId, assigneeId)) {
+                throw new AccessDeniedException("Only the project owner can change task assignment");
+            }
+            return;
+        }
+        task.setAssignee(assigneeId == null
+                ? null
+                : getActiveProjectMember(task.getProject().getId(), assigneeId));
+    }
+
+    private com.pablomarotta.smart_task_manager.model.User getActiveProjectMember(
+            Long projectId,
+            Long userId
+    ) {
+        com.pablomarotta.smart_task_manager.model.User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException("User not found with id: " + userId));
+        if (!Boolean.TRUE.equals(user.getActive())) {
+            throw new IllegalArgumentException("Inactive users cannot be assigned tasks");
+        }
+        if (!membershipRepository.existsByProjectIdAndUserId(projectId, userId)) {
+            throw new IllegalArgumentException("User is not a member of this project");
+        }
+        return user;
     }
 
     private void applyStatus(Task task, Status status) {

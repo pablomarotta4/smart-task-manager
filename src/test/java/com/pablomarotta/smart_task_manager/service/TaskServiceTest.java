@@ -12,6 +12,7 @@ import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.model.TaskAcceptanceCriterion;
 import com.pablomarotta.smart_task_manager.model.TaskDependency;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
+import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
@@ -51,6 +53,9 @@ class TaskServiceTest {
 
     @Mock
     private ProjectRepository projectRepository;
+
+    @Mock
+    private ProjectMembershipRepository membershipRepository;
 
     @Mock
     private AIService aiService;
@@ -166,6 +171,25 @@ class TaskServiceTest {
     }
 
     @Test
+    void createTaskRejectsAssigneeOutsideProject() {
+        Project project = ownedProject();
+        User outsider = User.builder().id(2L).username("mallory").active(true).build();
+        TaskRequest request = taskRequest();
+        request.setAssigneeId(2L);
+        when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))
+                .thenReturn(Optional.of(project));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(outsider));
+        when(membershipRepository.existsByProjectIdAndUserId(20L, 2L)).thenReturn(false);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> taskService.createTask(request, OWNER_USERNAME)
+        );
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
     void updateTaskRejectsForeignTask() {
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
                 .thenReturn(Optional.empty());
@@ -260,6 +284,20 @@ class TaskServiceTest {
     }
 
     @Test
+    void assignedContributorCannotDeleteTheirTask() {
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob"))
+                .thenReturn(Optional.empty());
+
+        assertThrows(
+                TaskNotFoundException.class,
+                () -> taskService.deleteTask(101L, "bob")
+        );
+
+        verify(taskRepository, never()).findByIdAndAssigneeUsername(any(), any());
+        verify(taskRepository, never()).delete(any());
+    }
+
+    @Test
     void statusMutationRejectsForeignTask() {
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
                 .thenReturn(Optional.empty());
@@ -287,6 +325,21 @@ class TaskServiceTest {
     }
 
     @Test
+    void assignedContributorCanUpdateTheirTaskStatus() {
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        existing.setAssignee(member);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob")).thenReturn(Optional.empty());
+        when(taskRepository.findByIdAndAssigneeUsername(101L, "bob")).thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        TaskResponse response = taskService.updateTaskStatus(101L, Status.DONE, "bob");
+
+        assertEquals(Status.DONE, response.getStatus());
+        assertNotNull(existing.getCompletedAt());
+    }
+
+    @Test
     void assignmentRejectsForeignTask() {
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
                 .thenReturn(Optional.empty());
@@ -297,6 +350,75 @@ class TaskServiceTest {
         );
 
         verify(userRepository, never()).findById(any());
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void assignmentRejectsUserOutsideProject() {
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        User outsider = User.builder().id(2L).username("mallory").active(true).build();
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
+                .thenReturn(Optional.of(existing));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(outsider));
+        when(membershipRepository.existsByProjectIdAndUserId(20L, 2L)).thenReturn(false);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> taskService.assignTask(101L, 2L, OWNER_USERNAME)
+        );
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void assignmentAcceptsProjectMember() {
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
+                .thenReturn(Optional.of(existing));
+        when(userRepository.findById(2L)).thenReturn(Optional.of(member));
+        when(membershipRepository.existsByProjectIdAndUserId(20L, 2L)).thenReturn(true);
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        TaskResponse response = taskService.assignTask(101L, 2L, OWNER_USERNAME);
+
+        assertEquals(2L, response.getAssigneeId());
+        assertSame(member, existing.getAssignee());
+    }
+
+    @Test
+    void assignedContributorCanUpdateTheirTicketWithoutReassigningIt() {
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        existing.setAssignee(member);
+        TaskRequest request = taskRequest();
+        request.setAssigneeId(2L);
+        request.setTitle("Contributor update");
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob")).thenReturn(Optional.empty());
+        when(taskRepository.findByIdAndAssigneeUsername(101L, "bob")).thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        TaskResponse response = taskService.updateTask(101L, request, "bob");
+
+        assertEquals("Contributor update", response.getTitle());
+        assertSame(member, existing.getAssignee());
+    }
+
+    @Test
+    void assignedContributorCannotReassignTheirTicket() {
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        existing.setAssignee(member);
+        TaskRequest request = taskRequest();
+        request.setAssigneeId(3L);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob")).thenReturn(Optional.empty());
+        when(taskRepository.findByIdAndAssigneeUsername(101L, "bob")).thenReturn(Optional.of(existing));
+
+        assertThrows(
+                org.springframework.security.access.AccessDeniedException.class,
+                () -> taskService.updateTask(101L, request, "bob")
+        );
+
         verify(taskRepository, never()).save(any());
     }
 
