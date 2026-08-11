@@ -1156,7 +1156,7 @@ export default function App({ client = apiClient }) {
               id="project-prompt"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              minLength={10}
+              minLength={3}
               maxLength={4000}
               rows={7}
               placeholder={planningTarget
@@ -1167,7 +1167,7 @@ export default function App({ client = apiClient }) {
             <button
               className="primary-action"
               type="submit"
-              disabled={phase === "generating" || prompt.trim().length < 10}
+              disabled={phase === "generating" || prompt.trim().length < 3}
               aria-busy={phase === "generating"}
             >
               <span>

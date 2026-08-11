@@ -23,6 +23,10 @@ const generatedDraft = {
     objective: "Plan and deliver a practical kitchen redesign within the agreed budget.",
     assumptions: ["The existing kitchen footprint stays unchanged"],
     risks: ["Contractor availability may affect the schedule"],
+    openQuestions: [
+      "Should the kitchen remain usable during construction?",
+      "Is there a fixed budget ceiling for the first release?",
+    ],
     tickets: [
       {
         client_id: "design-kitchen",
@@ -514,6 +518,26 @@ describe("AI project workshop", () => {
     expect(client.generateProject).toHaveBeenCalledWith({ token: "jwt-token", prompt });
   });
 
+  it("generates an immediate draft from a three-character brief", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.type(screen.getByLabelText(/describe your project/i), "CRM");
+    const generateButton = screen.getByRole("button", { name: /generate first plan/i });
+
+    expect(generateButton).toBeEnabled();
+    await user.click(generateButton);
+
+    expect(await screen.findByRole("heading", { name: "Kitchen Redesign Project" }))
+      .toBeInTheDocument();
+    expect(client.generateProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      prompt: "CRM",
+    });
+  });
+
   it("keeps the prompt available when generation fails", async () => {
     const user = userEvent.setup();
     const client = createClient();
@@ -719,6 +743,11 @@ describe("AI project workshop", () => {
     const firstTitle = screen.getByLabelText(/title for ticket 1/i);
     await user.clear(firstTitle);
     await user.type(firstTitle, "Document kitchen requirements with the homeowner");
+    expect(screen.getByRole("heading", { name: /open decisions/i })).toBeInTheDocument();
+    expect(screen.getByText(/you can confirm this draft now/i)).toBeInTheDocument();
+    const firstQuestion = screen.getByLabelText(/open question 1/i);
+    await user.clear(firstQuestion);
+    await user.type(firstQuestion, "Should work pause while the family is traveling?");
     const confirmButton = screen.getByRole("button", { name: /confirm and create project/i });
     const invalidFieldIds = Array.from(confirmButton.closest("form").elements)
       .filter((field) => !field.checkValidity())
@@ -730,6 +759,10 @@ describe("AI project workshop", () => {
       token: "jwt-token",
       runId: "run-1",
       draft: expect.objectContaining({
+        openQuestions: [
+          "Should work pause while the family is traveling?",
+          "Is there a fixed budget ceiling for the first release?",
+        ],
         tickets: expect.arrayContaining([
           expect.objectContaining({
             client_id: "design-kitchen",

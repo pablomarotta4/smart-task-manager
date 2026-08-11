@@ -12,6 +12,7 @@ export default function DraftEditor({
   onConfirm,
 }) {
   const isExistingTaskPlan = planningTarget != null;
+  const openQuestions = draft.openQuestions ?? [];
   const updateProjectField = (field, value) => {
     onChange({ ...draft, [field]: value });
   };
@@ -81,6 +82,42 @@ export default function DraftEditor({
               required
             />
           </div>
+
+          {openQuestions.length > 0 ? (
+            <section className="open-decisions" aria-labelledby="open-decisions-title">
+              <div className="open-decisions-copy">
+                <p className="decision-kicker">Optional context / {openQuestions.length}</p>
+                <h3 id="open-decisions-title">Open decisions</h3>
+                <p>
+                  You can confirm this draft now. These questions make the AI&apos;s uncertainty
+                  visible so you can edit the wording or revisit the decisions later.
+                </p>
+              </div>
+              <div className="open-question-list">
+                {openQuestions.map((question, index) => (
+                  <div className="open-question-row" key={`open-question-${index}`}>
+                    <span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+                    <div className="field-group">
+                      <label htmlFor={`open-question-${index}`}>
+                        Open question {index + 1}
+                      </label>
+                      <textarea
+                        id={`open-question-${index}`}
+                        value={question}
+                        minLength={10}
+                        maxLength={255}
+                        rows={2}
+                        onChange={(event) =>
+                          updateListItem("openQuestions", index, event.target.value)
+                        }
+                        required
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {draft.assumptions.length > 0 ? (
             <fieldset className="inline-list-editor">
