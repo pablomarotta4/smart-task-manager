@@ -463,6 +463,29 @@ describe("AI project workshop", () => {
     expect(await screen.findByText(/no saved ai plans yet/i)).toBeInTheDocument();
   });
 
+  it("ignores planning history that resolves after its session was replaced", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveOldHistory;
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveOldHistory = resolve;
+      }))
+      .mockResolvedValueOnce([]);
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /log out/i }));
+    await logIn(user, client);
+    await waitFor(() => expect(client.getGenerationRuns).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      resolveOldHistory([readyPlanningRun]);
+    });
+
+    expect(screen.queryByRole("button", { name: /resume draft/i }))
+      .not.toBeInTheDocument();
+  });
+
   it("shows quality evidence and lets the user edit ticket content", async () => {
     const user = userEvent.setup();
     const client = createClient();

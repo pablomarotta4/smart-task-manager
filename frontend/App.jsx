@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, apiClient } from "./api";
 import AccountSection from "./components/AccountSection";
@@ -52,19 +52,25 @@ export default function App({ client = apiClient }) {
   const [recentRunsPhase, setRecentRunsPhase] = useState("idle");
   const [recentRunsError, setRecentRunsError] = useState("");
   const [busyRunId, setBusyRunId] = useState(null);
+  const recentRunsRequestId = useRef(0);
 
   const sessionToken = session?.token;
   const loadRecentRuns = useCallback(async () => {
     if (!sessionToken) {
+      recentRunsRequestId.current += 1;
       setRecentRuns([]);
       return;
     }
+    const requestId = recentRunsRequestId.current + 1;
+    recentRunsRequestId.current = requestId;
     setRecentRunsError("");
     setRecentRunsPhase("loading");
     try {
       const runs = await client.getGenerationRuns({ token: sessionToken });
+      if (recentRunsRequestId.current !== requestId) return;
       setRecentRuns(runs);
     } catch (requestError) {
+      if (recentRunsRequestId.current !== requestId) return;
       if (requestError instanceof ApiError && requestError.status === 401) {
         sessionStorage.removeItem(SESSION_KEY);
         setSession(null);
@@ -72,7 +78,9 @@ export default function App({ client = apiClient }) {
         setRecentRunsError(errorMessage(requestError));
       }
     } finally {
-      setRecentRunsPhase("idle");
+      if (recentRunsRequestId.current === requestId) {
+        setRecentRunsPhase("idle");
+      }
     }
   }, [client, sessionToken]);
 
@@ -620,6 +628,7 @@ export default function App({ client = apiClient }) {
   };
 
   const handleLogout = () => {
+    recentRunsRequestId.current += 1;
     sessionStorage.removeItem(SESSION_KEY);
     setSession(null);
     setDraftResponse(null);
