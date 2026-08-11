@@ -4,9 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.PlanningTestFixtures;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationConfirmationResponse;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationDraftResponse;
+import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationRunDetailResponse;
+import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationRunSummaryResponse;
 import com.pablomarotta.smart_task_manager.exception.GlobalExceptionHandler;
+import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.service.ProjectGenerationConfirmationService;
+import com.pablomarotta.smart_task_manager.service.ProjectGenerationRunQueryService;
 import com.pablomarotta.smart_task_manager.service.ProjectGenerationService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +24,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -27,6 +32,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -37,6 +43,8 @@ class ProjectGenerationControllerTest {
     private ProjectGenerationService generationService;
     @Mock
     private ProjectGenerationConfirmationService confirmationService;
+    @Mock
+    private ProjectGenerationRunQueryService queryService;
 
     private MockMvc mockMvc;
     private ObjectMapper objectMapper;
@@ -46,13 +54,79 @@ class ProjectGenerationControllerTest {
     void setUp() {
         ProjectGenerationController controller = new ProjectGenerationController(
                 generationService,
-                confirmationService
+                confirmationService,
+                queryService
         );
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
         objectMapper = new ObjectMapper().findAndRegisterModules();
         runId = UUID.randomUUID();
+    }
+
+    @Test
+    void listsOnlyTheAuthenticatedUsersRecentRuns() throws Exception {
+        when(queryService.listRecent("alice")).thenReturn(List.of(
+                new ProjectGenerationRunSummaryResponse(
+                        runId,
+                        ProjectGenerationMode.EXISTING_TASK,
+                        ProjectGenerationStatus.DRAFT_READY,
+                        "Break this ticket into implementation steps",
+                        1,
+                        20L,
+                        "Budget App",
+                        201L,
+                        "Import transactions",
+                        null,
+                        false,
+                        LocalDateTime.of(2026, 8, 11, 10, 0),
+                        LocalDateTime.of(2026, 8, 11, 10, 1)
+                )
+        ));
+
+        mockMvc.perform(get("/api/project-generation-runs")
+                        .principal(new UsernamePasswordAuthenticationToken("alice", "ignored")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].runId").value(runId.toString()))
+                .andExpect(jsonPath("$[0].mode").value("EXISTING_TASK"))
+                .andExpect(jsonPath("$[0].targetTaskId").value(201));
+
+        verify(queryService).listRecent("alice");
+    }
+
+    @Test
+    void restoresOnePersistedDraftForTheAuthenticatedUser() throws Exception {
+        var aiResponse = PlanningTestFixtures.response(runId);
+        when(queryService.get(runId, "alice")).thenReturn(
+                new ProjectGenerationRunDetailResponse(
+                        runId,
+                        ProjectGenerationMode.NEW_PROJECT,
+                        ProjectGenerationStatus.DRAFT_READY,
+                        "Build a useful household budget application",
+                        1,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        LocalDateTime.of(2026, 8, 11, 10, 0),
+                        LocalDateTime.of(2026, 8, 11, 10, 1),
+                        aiResponse.draft(),
+                        aiResponse.quality(),
+                        aiResponse.revisionCount(),
+                        aiResponse.model()
+                )
+        );
+
+        mockMvc.perform(get("/api/project-generation-runs/{runId}", runId)
+                        .principal(new UsernamePasswordAuthenticationToken("alice", "ignored")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").value(runId.toString()))
+                .andExpect(jsonPath("$.draft.name").value("Budget App"))
+                .andExpect(jsonPath("$.quality.score").value(100));
+
+        verify(queryService).get(runId, "alice");
     }
 
     @Test

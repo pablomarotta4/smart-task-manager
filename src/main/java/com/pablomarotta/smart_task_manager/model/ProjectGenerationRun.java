@@ -63,6 +63,10 @@ public class ProjectGenerationRun {
     @Column(name = "error_code", length = 64)
     private String errorCode;
 
+    @Column(name = "attempt_count", nullable = false)
+    @Builder.Default
+    private int attemptCount = 1;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id")
     private Project project;
