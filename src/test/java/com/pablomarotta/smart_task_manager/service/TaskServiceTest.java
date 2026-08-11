@@ -24,12 +24,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -135,6 +139,33 @@ class TaskServiceTest {
     }
 
     @Test
+    void createTaskPersistsManualFieldsWithoutCallingAi() {
+        Project project = ownedProject();
+        TaskRequest request = taskRequest();
+        request.setPosition(null);
+        when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))
+                .thenReturn(Optional.of(project));
+        when(taskRepository.countByProjectId(20L)).thenReturn(2L);
+        when(taskRepository.save(any(Task.class))).thenAnswer(invocation -> {
+            Task saved = invocation.getArgument(0);
+            saved.setId(103L);
+            return saved;
+        });
+
+        TaskResponse response = taskService.createTask(request, OWNER_USERNAME);
+
+        assertEquals(103L, response.getId());
+        assertEquals(2, response.getPosition());
+        verify(taskRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
+                saved.getCreatedBy() == project.getOwner()
+                        && saved.getPosition() == 2
+                        && saved.getAiSummary() == null
+                        && saved.getAiPriority() == null
+        ));
+        verifyNoInteractions(aiService);
+    }
+
+    @Test
     void updateTaskRejectsForeignTask() {
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
                 .thenReturn(Optional.empty());
@@ -142,6 +173,63 @@ class TaskServiceTest {
         assertThrows(
                 TaskNotFoundException.class,
                 () -> taskService.updateTask(101L, taskRequest(), OWNER_USERNAME)
+        );
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void updateTaskClearsOptionalFieldsAndCompletionTimestamp() {
+        Project project = ownedProject();
+        Task existing = task(101L, project, null, "Existing ticket", 1);
+        existing.setDescription("Old description");
+        existing.setCategory("Old category");
+        existing.setStatus(Status.DONE);
+        existing.setCompletedAt(LocalDateTime.now().minusDays(1));
+        TaskRequest request = taskRequest();
+        request.setDescription(null);
+        request.setCategory(null);
+        request.setDueDate(null);
+        request.setStatus(Status.TODO);
+        request.setPosition(1);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        TaskResponse response = taskService.updateTask(101L, request, OWNER_USERNAME);
+
+        assertNull(response.getDescription());
+        assertNull(response.getCategory());
+        assertNull(response.getDueDate());
+        assertNull(existing.getCompletedAt());
+    }
+
+    @Test
+    void updateTaskMarksCompletionWhenEnteringDone() {
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        TaskRequest request = taskRequest();
+        request.setStatus(Status.DONE);
+        request.setPosition(1);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        taskService.updateTask(101L, request, OWNER_USERNAME);
+
+        assertNotNull(existing.getCompletedAt());
+    }
+
+    @Test
+    void updateTaskRejectsMovingTaskToAnotherProject() {
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        TaskRequest request = taskRequest();
+        request.setProjectId(21L);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
+                .thenReturn(Optional.of(existing));
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> taskService.updateTask(101L, request, OWNER_USERNAME)
         );
 
         verify(taskRepository, never()).save(any());
@@ -161,6 +249,17 @@ class TaskServiceTest {
     }
 
     @Test
+    void deleteTaskRemovesOwnedTask() {
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
+                .thenReturn(Optional.of(existing));
+
+        taskService.deleteTask(101L, OWNER_USERNAME);
+
+        verify(taskRepository).delete(existing);
+    }
+
+    @Test
     void statusMutationRejectsForeignTask() {
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
                 .thenReturn(Optional.empty());
@@ -171,6 +270,20 @@ class TaskServiceTest {
         );
 
         verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void statusMutationClearsCompletionWhenReopeningTask() {
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        existing.setStatus(Status.DONE);
+        existing.setCompletedAt(LocalDateTime.now().minusHours(1));
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.save(existing)).thenReturn(existing);
+
+        taskService.updateTaskStatus(101L, Status.IN_PROGRESS, OWNER_USERNAME);
+
+        assertNull(existing.getCompletedAt());
     }
 
     @Test

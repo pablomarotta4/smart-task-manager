@@ -28,6 +28,7 @@ public class TaskRequest {
 
     private Priority priority;
 
+    @Size(max = 32)
     private String category;
 
     private LocalDate dueDate;

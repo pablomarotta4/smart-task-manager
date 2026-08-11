@@ -35,7 +35,6 @@ public class TaskService {
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
     private final ProjectRepository projectRepository;
-    private final AIService aiService;
     private final TaskAcceptanceCriterionRepository acceptanceCriterionRepository;
     private final TaskDependencyRepository dependencyRepository;
 
@@ -53,27 +52,19 @@ public class TaskService {
             var project = projectRepository.findByIdAndOwnerUsername(taskRequest.getProjectId(), username)
                     .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + taskRequest.getProjectId()));
 
-            AIClassificationRequest aiRequest = AIClassificationRequest.builder()
-                    .title(taskRequest.getTitle())
-                    .description(taskRequest.getDescription())
-                    .build();
-
-            AIClassificationResponse aiResponse = aiService.classifyTask(aiRequest);
-
             var taskBuilder = Task.builder()
                     .id(null)
                     .title(validateTitle(taskRequest.getTitle()))
-                    .description(taskRequest.getDescription())
+                    .description(normalizeOptionalText(taskRequest.getDescription()))
                     .status(taskRequest.getStatus() != null ? taskRequest.getStatus() : Status.TODO)
                     .project(project)
+                    .createdBy(project.getOwner())
                     .priority(taskRequest.getPriority())
-                    .category(taskRequest.getCategory())
+                    .category(normalizeOptionalText(taskRequest.getCategory()))
                     .dueDate(validateDueDate(taskRequest.getDueDate()))
-                    .position(validatePosition(taskRequest.getPosition()))
-                    .aiPriority(aiResponse.getPriority())
-                    .aiCategory(aiResponse.getCategory())
-                    .aiSuggestedDueDays(aiResponse.getEstimatedDays())
-                    .aiSummary(aiResponse.getSummary());
+                    .position(taskRequest.getPosition() == null
+                            ? Math.toIntExact(taskRepository.countByProjectId(project.getId()))
+                            : validatePosition(taskRequest.getPosition()));
 
             if (taskRequest.getAssigneeId() != null) {
                 var assignee = userRepository.findById(taskRequest.getAssigneeId())
@@ -85,7 +76,7 @@ public class TaskService {
             Task savedTask = taskRepository.save(task);
             return mapToResponse(savedTask);
             
-        } catch (ProjectNotFoundException | UserNotFoundException e) {
+        } catch (ProjectNotFoundException | UserNotFoundException | IllegalArgumentException e) {
             throw e;
         } catch (DataIntegrityViolationException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Data integrity violation: " + e.getMessage(), e);
@@ -107,10 +98,23 @@ public class TaskService {
         taskResponse.setDueDate(task.getDueDate());
         taskResponse.setPosition(task.getPosition());
         taskResponse.setProjectId(task.getProject().getId());
+        taskResponse.setProjectName(task.getProject().getName());
 
         if (task.getAssignee() != null) {
             taskResponse.setAssigneeId(task.getAssignee().getId());
+            taskResponse.setAssigneeUsername(task.getAssignee().getUsername());
         }
+        if (task.getCreatedBy() != null) {
+            taskResponse.setCreatedById(task.getCreatedBy().getId());
+            taskResponse.setCreatedByUsername(task.getCreatedBy().getUsername());
+        }
+        taskResponse.setCreatedAt(task.getCreatedAt() == null ? null : task.getCreatedAt().toString());
+        taskResponse.setUpdatedAt(task.getUpdatedAt() == null ? null : task.getUpdatedAt().toString());
+        taskResponse.setCompletedAt(task.getCompletedAt() == null ? null : task.getCompletedAt().toString());
+        taskResponse.setAiCategory(task.getAiCategory());
+        taskResponse.setAiSuggestedDueDays(task.getAiSuggestedDueDays());
+        taskResponse.setAiSuggestedDueDate(task.getAiSuggestedDueDate());
+        taskResponse.setAiSummary(task.getAiSummary());
 
         return taskResponse;
     }
@@ -239,22 +243,16 @@ public class TaskService {
         
         try {
             Task task = getOwnedTask(id, username);
+            if (!task.getProject().getId().equals(taskRequest.getProjectId())) {
+                throw new IllegalArgumentException("Task cannot be moved to another project");
+            }
 
-            if (taskRequest.getTitle() != null) {
-                task.setTitle(validateTitle(taskRequest.getTitle()));
-            }
-            if (taskRequest.getDescription() != null) {
-                task.setDescription(taskRequest.getDescription());
-            }
-            if (taskRequest.getDueDate() != null) {
-                task.setDueDate(validateDueDate(taskRequest.getDueDate()));
-            }
-            if (taskRequest.getStatus() != null) {
-                task.setStatus(taskRequest.getStatus());
-            }
-            if (taskRequest.getPriority() != null) {
-                task.setPriority(taskRequest.getPriority());
-            }
+            task.setTitle(validateTitle(taskRequest.getTitle()));
+            task.setDescription(normalizeOptionalText(taskRequest.getDescription()));
+            task.setDueDate(validateDueDate(taskRequest.getDueDate()));
+            applyStatus(task, taskRequest.getStatus());
+            task.setPriority(taskRequest.getPriority());
+            task.setCategory(normalizeOptionalText(taskRequest.getCategory()));
             if (taskRequest.getPosition() != null) {
                 task.setPosition(validatePosition(taskRequest.getPosition()));
             }
@@ -293,11 +291,7 @@ public class TaskService {
         try {
             Task task = getOwnedTask(id, username);
 
-            task.setStatus(status);
-
-            if (status == Status.DONE) {
-                task.setCompletedAt(LocalDateTime.now());
-            }
+            applyStatus(task, status);
 
             Task updatedTask = taskRepository.save(task);
             return mapToResponse(updatedTask);
@@ -362,6 +356,27 @@ public class TaskService {
         return taskRepository.findByIdAndProjectOwnerUsername(taskId, username)
                 .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
     }
+
+    private void applyStatus(Task task, Status status) {
+        if (status == null) {
+            throw new IllegalArgumentException("Status cannot be null");
+        }
+        task.setStatus(status);
+        if (status == Status.DONE) {
+            if (task.getCompletedAt() == null) {
+                task.setCompletedAt(LocalDateTime.now());
+            }
+        } else {
+            task.setCompletedAt(null);
+        }
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
     
     // Validation helper methods
     private String validateTitle(String title) {
@@ -385,6 +400,6 @@ public class TaskService {
         if (position != null && position < 0) {
             throw new IllegalArgumentException("Position cannot be negative");
         }
-        return position != null ? position : 0;
+        return position;
     }
 }
