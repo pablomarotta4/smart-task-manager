@@ -1814,6 +1814,80 @@ h3 {
   padding-top: 1rem;
 }
 
+.project-people {
+  background: #eef0e5;
+}
+
+.project-people-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.project-people-heading h3 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.project-people-heading > span {
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.project-member-list {
+  border-top: 1px solid var(--line);
+}
+
+.project-member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.9rem 1.2rem;
+}
+
+.project-member > div:first-child,
+.project-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.project-member > div:first-child span {
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+}
+
+.project-owner-badge {
+  border: 1px solid var(--olive);
+  color: var(--olive);
+  padding: 0.32rem 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.project-member-add {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.project-people > .project-mutation-error {
+  margin: 0 1.2rem 1.2rem;
+}
+
 .danger-action {
   min-height: 2.8rem;
   border: 1px solid var(--accent-dark);
@@ -2073,7 +2147,7 @@ h3 {
 
 .ticket-context-strip {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   border: 1px solid var(--line);
   background: var(--paper-deep);
 }
@@ -2801,6 +2875,24 @@ h3 {
   .project-desk-planning .primary-action {
     grid-column: 1;
     width: 100%;
+  }
+
+  .project-member-add {
+    grid-template-columns: 1fr;
+  }
+
+  .project-member-add .primary-action {
+    width: 100%;
+  }
+
+  .project-member,
+  .project-member > div:first-child {
+    align-items: flex-start;
+  }
+
+  .project-member > div:first-child {
+    flex-direction: column;
+    gap: 0.2rem;
   }
 
   .project-facts {

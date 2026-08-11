@@ -7,6 +7,7 @@ const labelFor = (value) => value.toLowerCase().replaceAll("_", " ");
 
 export default function TicketDetailPanel({
   task,
+  members,
   saving,
   deleting,
   error,
@@ -21,6 +22,7 @@ export default function TicketDetailPanel({
     status: task.status,
     priority: task.priority ?? "MEDIUM",
     dueDate: task.dueDate ?? "",
+    assigneeId: task.assigneeId == null ? "" : String(task.assigneeId),
   });
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -50,7 +52,7 @@ export default function TicketDetailPanel({
       description: draft.description.trim(),
       status: draft.status,
       projectId: task.projectId,
-      assigneeId: task.assigneeId ?? null,
+      assigneeId: draft.assigneeId ? Number(draft.assigneeId) : null,
       priority: draft.priority,
       category: task.category ?? null,
       dueDate: draft.dueDate || null,
@@ -143,12 +145,31 @@ export default function TicketDetailPanel({
                 onChange={handleChange}
               />
             </div>
+            {members ? (
+              <div className="field-group">
+                <label htmlFor={`ticket-assignee-${task.id}`}>Assignee</label>
+                <select
+                  id={`ticket-assignee-${task.id}`}
+                  name="assigneeId"
+                  value={draft.assigneeId}
+                  onChange={handleChange}
+                >
+                  <option value="">Unassigned</option>
+                  {members.map((member) => (
+                    <option key={member.userId} value={member.userId}>
+                      {member.fullName || member.username}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
           </div>
 
           <div className="ticket-context-strip">
             <span>{task.category || "Uncategorized"}</span>
             <span>{task.estimatedHours == null ? "No estimate" : `${Number(task.estimatedHours)}h estimate`}</span>
             <span>{task.dependsOn?.length ? `${task.dependsOn.length} dependencies` : "No dependencies"}</span>
+            <span>{task.assigneeUsername ? `Assigned to ${task.assigneeUsername}` : "Unassigned"}</span>
           </div>
 
           {task.acceptanceCriteria?.length ? (
@@ -164,7 +185,7 @@ export default function TicketDetailPanel({
 
           {error ? <p className="error-banner" role="alert">{error}</p> : null}
 
-          {confirmingDelete ? (
+          {onDelete && confirmingDelete ? (
             <div
               className="ticket-delete-confirmation"
               role="alertdialog"
@@ -196,14 +217,16 @@ export default function TicketDetailPanel({
           ) : null}
 
           <footer className="ticket-sheet-actions">
-            <button
-              className="danger-action"
-              type="button"
-              disabled={saving || deleting}
-              onClick={() => setConfirmingDelete(true)}
-            >
-              Delete ticket
-            </button>
+            {onDelete ? (
+              <button
+                className="danger-action"
+                type="button"
+                disabled={saving || deleting}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                Delete ticket
+              </button>
+            ) : <span />}
             <div>
               <button className="text-action" type="button" onClick={onClose}>Cancel</button>
               <button

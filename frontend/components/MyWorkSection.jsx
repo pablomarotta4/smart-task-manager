@@ -36,6 +36,7 @@ function WorkTicket({ task, index, onSelectTask }) {
       <span className="work-ticket-meta">
         {overdue ? <span className="work-ticket-overdue">Overdue</span> : null}
         <span>{task.priority?.toLowerCase() ?? "no priority"}</span>
+        <span>{task.assigneeUsername ? `Assigned to ${task.assigneeUsername}` : "Assigned to you"}</span>
         <span>{formatDate(task.dueDate)}</span>
       </span>
     </button>
@@ -48,12 +49,10 @@ export default function MyWorkSection({
   error,
   selectedTask,
   savingTask,
-  taskMutationPhase,
   taskError,
   onSelectTask,
   onCloseTask,
   onSaveTask,
-  onDeleteTask,
   onRetry,
 }) {
   const loading = phase === "loading-projects" || phase === "loading-tasks";
@@ -83,7 +82,7 @@ export default function MyWorkSection({
           <h1 id="my-work-title">My work</h1>
         </div>
         <p>
-          One execution queue across every project. Start with motion, then clear the blockers.
+          Every ticket assigned to you, across every project. Start with motion, then clear the blockers.
         </p>
       </header>
 
@@ -97,7 +96,7 @@ export default function MyWorkSection({
       {loading ? (
         <div className="archive-status" role="status">
           <span className="status-orbit" aria-hidden="true" />
-          <p>Collecting work across projects…</p>
+          <p>Collecting your assigned work…</p>
         </div>
       ) : null}
 
@@ -113,8 +112,8 @@ export default function MyWorkSection({
           {items.length === 0 ? (
             <div className="projects-empty">
               <span aria-hidden="true">∅</span>
-              <h2>No work yet</h2>
-              <p>Confirm a project plan to build your execution queue.</p>
+              <h2>No assigned work</h2>
+              <p>No tickets are assigned to you.</p>
             </div>
           ) : (
             <div className="work-ledger">
@@ -166,11 +165,9 @@ export default function MyWorkSection({
           key={selectedTask.id}
           task={selectedTask}
           saving={savingTask}
-          deleting={taskMutationPhase === "deleting"}
           error={taskError}
           onClose={onCloseTask}
           onSave={onSaveTask}
-          onDelete={onDeleteTask}
         />
       ) : null}
     </section>

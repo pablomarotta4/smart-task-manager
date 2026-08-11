@@ -7,11 +7,12 @@ const EMPTY_TASK = {
   priority: "MEDIUM",
   category: "",
   dueDate: "",
+  assigneeId: "",
 };
 
 const labelFor = (value) => value.toLowerCase().replaceAll("_", " ");
 
-export default function TaskCreatePanel({ project, creating, error, onCreate, onCancel }) {
+export default function TaskCreatePanel({ project, members, creating, error, onCreate, onCancel }) {
   const [draft, setDraft] = useState(EMPTY_TASK);
 
   const handleChange = (event) => {
@@ -26,7 +27,7 @@ export default function TaskCreatePanel({ project, creating, error, onCreate, on
       description: draft.description.trim() || null,
       status: "TODO",
       projectId: project.id,
-      assigneeId: null,
+      assigneeId: draft.assigneeId ? Number(draft.assigneeId) : null,
       priority: draft.priority,
       category: draft.category.trim() || null,
       dueDate: draft.dueDate || null,
@@ -80,6 +81,22 @@ export default function TaskCreatePanel({ project, creating, error, onCreate, on
           >
             {PRIORITIES.map((priority) => (
               <option key={priority} value={priority}>{labelFor(priority)}</option>
+            ))}
+          </select>
+        </div>
+        <div className="field-group">
+          <label htmlFor="new-ticket-assignee">Ticket assignee</label>
+          <select
+            id="new-ticket-assignee"
+            name="assigneeId"
+            value={draft.assigneeId}
+            onChange={handleChange}
+          >
+            <option value="">Unassigned</option>
+            {members.map((member) => (
+              <option key={member.userId} value={member.userId}>
+                {member.fullName || member.username}
+              </option>
             ))}
           </select>
         </div>

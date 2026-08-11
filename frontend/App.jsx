@@ -33,6 +33,7 @@ export default function App({ client = apiClient }) {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectTasks, setProjectTasks] = useState([]);
+  const [projectMembers, setProjectMembers] = useState([]);
   const [projectPhase, setProjectPhase] = useState("idle");
   const [projectError, setProjectError] = useState("");
   const [projectMutationPhase, setProjectMutationPhase] = useState("idle");
@@ -40,6 +41,8 @@ export default function App({ client = apiClient }) {
   const [selectedTask, setSelectedTask] = useState(null);
   const [taskMutationPhase, setTaskMutationPhase] = useState("idle");
   const [taskError, setTaskError] = useState("");
+  const [memberMutationPhase, setMemberMutationPhase] = useState("idle");
+  const [memberError, setMemberError] = useState("");
   const [workItems, setWorkItems] = useState([]);
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
@@ -135,6 +138,7 @@ export default function App({ client = apiClient }) {
     setProjectPhase("loading-projects");
     setSelectedProject(null);
     setProjectTasks([]);
+    setProjectMembers([]);
     setSelectedTask(null);
 
     try {
@@ -159,15 +163,17 @@ export default function App({ client = apiClient }) {
   const handleSelectProject = async (project) => {
     setSelectedProject(project);
     setProjectTasks([]);
+    setProjectMembers([]);
     setSelectedTask(null);
     setProjectError("");
     setProjectPhase("loading-tasks");
     try {
-      const tasks = await client.getProjectTasks({
-        token: session.token,
-        projectId: project.id,
-      });
+      const [tasks, members] = await Promise.all([
+        client.getProjectTasks({ token: session.token, projectId: project.id }),
+        client.getProjectMembers({ token: session.token, projectId: project.id }),
+      ]);
       setProjectTasks(tasks);
+      setProjectMembers(members);
       setProjectPhase("idle");
     } catch (requestError) {
       handleProjectRequestError(requestError);
@@ -192,6 +198,7 @@ export default function App({ client = apiClient }) {
       )]);
       setSelectedProject(created);
       setProjectTasks([]);
+      setProjectMembers([]);
       setSelectedTask(null);
       return true;
     } catch (requestError) {
@@ -243,6 +250,7 @@ export default function App({ client = apiClient }) {
       setProjects((current) => current.filter((candidate) => candidate.id !== project.id));
       setSelectedProject(null);
       setProjectTasks([]);
+      setProjectMembers([]);
       setSelectedTask(null);
       setActiveView("projects");
       return true;
@@ -264,6 +272,7 @@ export default function App({ client = apiClient }) {
     setProjectError("");
     setProjectPhase("loading-projects");
     setProjectTasks([]);
+    setProjectMembers([]);
     setSelectedTask(null);
 
     try {
@@ -278,11 +287,12 @@ export default function App({ client = apiClient }) {
 
       if (project) {
         setProjectPhase("loading-tasks");
-        const tasks = await client.getProjectTasks({
-          token: session.token,
-          projectId: project.id,
-        });
+        const [tasks, members] = await Promise.all([
+          client.getProjectTasks({ token: session.token, projectId: project.id }),
+          client.getProjectMembers({ token: session.token, projectId: project.id }),
+        ]);
         setProjectTasks(tasks);
+        setProjectMembers(members);
       }
       setProjectPhase("idle");
     } catch (requestError) {
@@ -307,6 +317,11 @@ export default function App({ client = apiClient }) {
         priority: updated.priority ?? taskDraft.priority,
         dueDate: updated.dueDate === undefined ? taskDraft.dueDate : updated.dueDate,
         position: updated.position ?? taskDraft.position,
+        assigneeId: updated.assigneeId === undefined ? taskDraft.assigneeId : updated.assigneeId,
+        assigneeUsername: updated.assigneeUsername === undefined
+          ? projectMembers.find((member) => member.userId === taskDraft.assigneeId)?.username
+            ?? (task.assigneeId === taskDraft.assigneeId ? task.assigneeUsername : null)
+          : updated.assigneeUsername,
       };
       setProjectTasks((current) => current.map(
         (candidate) => candidate.id === task.id ? mergedTask : candidate,
@@ -346,6 +361,9 @@ export default function App({ client = apiClient }) {
         dependsOn: [],
         ...task,
         ...created,
+        assigneeUsername: created.assigneeUsername === undefined
+          ? projectMembers.find((member) => member.userId === task.assigneeId)?.username ?? null
+          : created.assigneeUsername,
       };
       setProjectTasks((current) => [...current, normalizedTask]);
       updateProjectTaskCount(task.projectId, 1);
@@ -389,31 +407,72 @@ export default function App({ client = apiClient }) {
   const handleOpenMyWork = async () => {
     setActiveView("my-work");
     setProjectError("");
-    setProjectPhase("loading-projects");
+    setProjectPhase("loading-tasks");
     setSelectedTask(null);
     setWorkItems([]);
 
     try {
-      const loadedProjects = await client.getProjects({ token: session.token });
-      setProjects(loadedProjects);
-      setProjectPhase("loading-tasks");
-      const projectBacklogs = await Promise.all(
-        loadedProjects.map(async (project) => {
-          const tasks = await client.getProjectTasks({
-            token: session.token,
-            projectId: project.id,
-          });
-          return tasks.map((task) => ({
-            ...task,
-            projectId: project.id,
-            projectName: project.name,
-          }));
-        }),
-      );
-      setWorkItems(projectBacklogs.flat());
+      const assignedTasks = await client.getMyWork({ token: session.token });
+      setWorkItems(assignedTasks);
       setProjectPhase("idle");
     } catch (requestError) {
       handleProjectRequestError(requestError);
+    }
+  };
+
+  const handleAddProjectMember = async (username) => {
+    setMemberError("");
+    setMemberMutationPhase("adding");
+    try {
+      const member = await client.addProjectMember({
+        token: session.token,
+        projectId: selectedProject.id,
+        username,
+      });
+      setProjectMembers((current) => [
+        ...current.filter((candidate) => candidate.userId !== member.userId),
+        member,
+      ]);
+      return true;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setMemberError(errorMessage(requestError));
+      }
+      return false;
+    } finally {
+      setMemberMutationPhase("idle");
+    }
+  };
+
+  const handleRemoveProjectMember = async (member) => {
+    setMemberError("");
+    setMemberMutationPhase("removing");
+    try {
+      await client.removeProjectMember({
+        token: session.token,
+        projectId: selectedProject.id,
+        userId: member.userId,
+      });
+      setProjectMembers((current) => current.filter(
+        (candidate) => candidate.userId !== member.userId,
+      ));
+      setProjectTasks((current) => current.map((task) => task.assigneeId === member.userId
+        ? { ...task, assigneeId: null, assigneeUsername: null }
+        : task));
+      return true;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setMemberError(errorMessage(requestError));
+      }
+      return false;
+    } finally {
+      setMemberMutationPhase("idle");
     }
   };
 
@@ -441,8 +500,11 @@ export default function App({ client = apiClient }) {
     setProjects([]);
     setSelectedProject(null);
     setProjectTasks([]);
+    setProjectMembers([]);
     setSelectedTask(null);
     setTaskError("");
+    setMemberError("");
+    setMemberMutationPhase("idle");
     setTaskMutationPhase("idle");
     setWorkItems([]);
     setProjectError("");
@@ -613,6 +675,9 @@ export default function App({ client = apiClient }) {
           savingTask={taskMutationPhase === "updating"}
           taskError={taskError}
           taskMutationPhase={taskMutationPhase}
+          projectMembers={projectMembers}
+          memberMutationPhase={memberMutationPhase}
+          memberError={memberError}
           projectMutationPhase={projectMutationPhase}
           projectMutationError={projectMutationError}
           onSelectProject={handleSelectProject}
@@ -624,6 +689,8 @@ export default function App({ client = apiClient }) {
           onSaveTask={handleSaveTask}
           onCreateTask={handleCreateTask}
           onDeleteTask={handleDeleteTask}
+          onAddProjectMember={handleAddProjectMember}
+          onRemoveProjectMember={handleRemoveProjectMember}
           onPlanFollowUp={handlePlanFollowUp}
           onUpdateProject={handleUpdateProject}
           onDeleteProject={handleDeleteProject}
@@ -636,7 +703,6 @@ export default function App({ client = apiClient }) {
           error={projectError}
           selectedTask={selectedTask}
           savingTask={taskMutationPhase === "updating"}
-          taskMutationPhase={taskMutationPhase}
           taskError={taskError}
           onSelectTask={(task) => {
             setTaskError("");
@@ -644,7 +710,6 @@ export default function App({ client = apiClient }) {
           }}
           onCloseTask={() => setSelectedTask(null)}
           onSaveTask={handleSaveTask}
-          onDeleteTask={handleDeleteTask}
           onRetry={handleOpenMyWork}
         />
       ) : activeView === "account" ? (

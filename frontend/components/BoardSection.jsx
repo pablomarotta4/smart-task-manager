@@ -30,6 +30,9 @@ export default function BoardSection({
   savingTask,
   taskError,
   taskMutationPhase,
+  projectMembers,
+  memberMutationPhase,
+  memberError,
   projectMutationPhase,
   projectMutationError,
   onSelectProject,
@@ -38,6 +41,8 @@ export default function BoardSection({
   onSaveTask,
   onCreateTask,
   onDeleteTask,
+  onAddProjectMember,
+  onRemoveProjectMember,
   onPlanFollowUp,
   onUpdateProject,
   onDeleteProject,
@@ -92,6 +97,7 @@ export default function BoardSection({
         <TaskCreatePanel
           key={selectedProject.id}
           project={selectedProject}
+          members={projectMembers}
           creating={taskMutationPhase === "creating"}
           error={taskError}
           onCreate={onCreateTask}
@@ -133,11 +139,16 @@ export default function BoardSection({
           <ProjectDesk
             project={selectedProject}
             taskCount={activeTasks.length}
+            members={projectMembers}
+            memberMutationPhase={memberMutationPhase}
+            memberError={memberError}
             mutationPhase={projectMutationPhase}
             error={projectMutationError}
             onPlanFollowUp={onPlanFollowUp}
             onUpdateProject={onUpdateProject}
             onDeleteProject={onDeleteProject}
+            onAddMember={onAddProjectMember}
+            onRemoveMember={onRemoveProjectMember}
           />
 
           <div className="board-lanes" aria-label={`${selectedProject.name} ticket board`}>
@@ -193,6 +204,7 @@ export default function BoardSection({
         <TicketDetailPanel
           key={selectedTask.id}
           task={selectedTask}
+          members={projectMembers}
           saving={savingTask}
           deleting={taskMutationPhase === "deleting"}
           error={taskError}

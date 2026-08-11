@@ -1,5 +1,5 @@
 import { act } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,7 @@ import { ApiError } from "./api";
 const authenticatedUser = {
   token: "jwt-token",
   user: {
+    id: 18,
     username: "pablo-local",
     fullName: "Pablo Local Tester",
   },
@@ -181,6 +182,52 @@ const savedOtherProjectTasks = [
   },
 ];
 
+const projectMembers = [
+  {
+    membershipId: 401,
+    userId: 18,
+    username: "pablo-local",
+    fullName: "Pablo Local Tester",
+    owner: true,
+    joinedAt: "2026-08-09T12:00:00",
+  },
+  {
+    membershipId: 402,
+    userId: 2,
+    username: "bob",
+    fullName: "Bob Builder",
+    owner: false,
+    joinedAt: "2026-08-10T12:00:00",
+  },
+];
+
+const assignedWorkItems = [
+  {
+    ...savedProjectTasks[1],
+    projectName: savedProjects[0].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+  {
+    ...savedOtherProjectTasks[0],
+    projectName: savedProjects[1].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+  {
+    ...savedOtherProjectTasks[1],
+    projectName: savedProjects[1].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+  {
+    ...savedOtherProjectTasks[2],
+    projectName: savedProjects[1].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+];
+
 const createClient = () => ({
   login: vi.fn().mockResolvedValue(authenticatedUser),
   generateProject: vi.fn().mockResolvedValue(generatedDraft),
@@ -197,13 +244,26 @@ const createClient = () => ({
   updateProject: vi.fn().mockImplementation(({ projectId, project }) =>
     Promise.resolve({ ...savedProjects[0], id: projectId, ...project })),
   deleteProject: vi.fn().mockResolvedValue(null),
+  getProjectMembers: vi.fn().mockResolvedValue(projectMembers),
+  addProjectMember: vi.fn().mockImplementation(({ username }) => Promise.resolve({
+    membershipId: 403,
+    userId: 3,
+    username,
+    fullName: "Carol Coordinator",
+    owner: false,
+    joinedAt: "2026-08-11T12:00:00",
+  })),
+  removeProjectMember: vi.fn().mockResolvedValue(null),
   getProjectTasks: vi.fn().mockResolvedValue(savedProjectTasks),
+  getMyWork: vi.fn().mockResolvedValue(assignedWorkItems),
   createTask: vi.fn().mockImplementation(({ task }) =>
     Promise.resolve({ id: 203, ...task })),
   updateTask: vi.fn().mockImplementation(({ taskId, task }) =>
     Promise.resolve({ id: taskId, ...task })),
   updateTaskStatus: vi.fn().mockImplementation(({ taskId, status }) =>
     Promise.resolve({ id: taskId, status })),
+  assignTask: vi.fn().mockImplementation(({ taskId, userId }) =>
+    Promise.resolve({ id: taskId, assigneeId: userId })),
   deleteTask: vi.fn().mockResolvedValue(null),
 });
 
@@ -639,40 +699,86 @@ describe("AI project workshop", () => {
     expect(screen.queryByText("Prepare release notes")).not.toBeInTheDocument();
   });
 
-  it("loads every project backlog concurrently into My Work", async () => {
+  it("loads only the authenticated user's assigned queue into My Work", async () => {
     const user = userEvent.setup();
     const client = createClient();
-    const resolvers = new Map();
-    client.getProjectTasks.mockImplementation(({ projectId }) =>
-      new Promise((resolve) => {
-        resolvers.set(projectId, resolve);
-      }));
     render(<App client={client} />);
     await logIn(user, client);
 
     await user.click(screen.getByRole("button", { name: /my work/i }));
 
     expect(await screen.findByRole("heading", { name: /my work/i })).toBeInTheDocument();
-    await waitFor(() => expect(client.getProjectTasks).toHaveBeenCalledTimes(2));
-    expect([...resolvers.keys()]).toEqual([20, 19]);
-
-    await act(async () => {
-      resolvers.get(20)(savedProjectTasks);
-      resolvers.get(19)(savedOtherProjectTasks);
-    });
-
+    expect(client.getMyWork).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getProjects).not.toHaveBeenCalled();
+    expect(client.getProjectTasks).not.toHaveBeenCalled();
     expect(await screen.findByText("Repair the reservation handoff")).toBeInTheDocument();
     expect(screen.getByText("Catalog the remaining hand tools")).toBeInTheDocument();
+    expect(screen.queryByText("Create opportunity intake")).not.toBeInTheDocument();
     const overdueTicket = screen.getByRole("button", {
       name: /open reconcile the inventory audit/i,
     });
     expect(within(overdueTicket).getByText(/^overdue$/i)).toBeInTheDocument();
+    await user.click(overdueTicket);
+    const personalTicket = screen.getByRole("dialog", { name: /edit reconcile the inventory audit/i });
+    expect(within(personalTicket).queryByLabelText(/^assignee$/i)).not.toBeInTheDocument();
+    expect(within(personalTicket).queryByRole("button", { name: /delete ticket/i }))
+      .not.toBeInTheDocument();
+    await user.click(within(personalTicket).getByRole("button", { name: /close ticket/i }));
     expect(screen.getByRole("heading", { name: /blocked/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /due next/i })).toBeInTheDocument();
     expect(screen.getAllByText("Job Application Tracker - Initial Backlog").length)
       .toBeGreaterThan(0);
     expect(screen.getAllByText("Neighborhood Tool Lending Library - Phase 1").length)
       .toBeGreaterThan(0);
+  });
+
+  it("manages project participants and assigns a ticket to a member", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(client.getProjectMembers).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    const peoplePanel = screen.getByLabelText(/project participants/i);
+    expect(within(peoplePanel).getByText("Pablo Local Tester")).toBeInTheDocument();
+    expect(within(peoplePanel).getByText("Bob Builder")).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/participant username/i), "carol");
+    await user.click(screen.getByRole("button", { name: /add participant/i }));
+
+    expect(client.addProjectMember).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      username: "carol",
+    });
+    expect(await screen.findByText("Carol Coordinator")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const ticketPanel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    await user.selectOptions(within(ticketPanel).getByLabelText(/^assignee$/i), "2");
+    await user.click(within(ticketPanel).getByRole("button", { name: /save ticket/i }));
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 201,
+      task: expect.objectContaining({ assigneeId: 2 }),
+    });
+
+    await user.click(screen.getByRole("button", { name: /remove bob builder/i }));
+    expect(screen.getByText(/unassigns their tickets from this project/i)).toBeInTheDocument();
+    expect(client.removeProjectMember).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /^remove participant$/i }));
+
+    expect(client.removeProjectMember).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      userId: 2,
+    });
+    expect(within(peoplePanel).queryByText("Bob Builder")).not.toBeInTheDocument();
   });
 
   it("opens an honest AI follow-up brief from the project desk", async () => {
