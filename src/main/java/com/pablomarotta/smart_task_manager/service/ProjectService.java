@@ -52,7 +52,7 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public List<ProjectResponse> getAllProjects(String username) {
-        Map<Long, Long> taskCounts = taskRepository.countTasksByProject().stream()
+        Map<Long, Long> taskCounts = taskRepository.countTasksByProjectOwnerUsername(username).stream()
                 .collect(Collectors.toMap(
                         TaskRepository.ProjectTaskCount::getProjectId,
                         TaskRepository.ProjectTaskCount::getTaskCount

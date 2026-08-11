@@ -75,6 +75,25 @@ class SecurityTest {
     }
 
     @Test
+    void protectedEndpoint_WithInactiveAccountToken_ShouldReturnUnauthorized() throws Exception {
+        UserDetails userDetails = User.withUsername("inactive")
+                .password("password")
+                .authorities("ROLE_USER")
+                .disabled(true)
+                .build();
+
+        when(jwtTokenProvider.validateToken("inactive-token")).thenReturn(true);
+        when(jwtTokenProvider.getUsernameFromToken("inactive-token")).thenReturn("inactive");
+        when(userDetailsService.loadUserByUsername("inactive")).thenReturn(userDetails);
+
+        mockMvc.perform(get("/api/tasks/alltasks")
+                        .header("Authorization", "Bearer inactive-token"))
+                .andExpect(status().isUnauthorized());
+
+        verify(taskService, never()).getAllTasks(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
     void publicEndpoint_WithoutToken_ShouldReturnCreated() throws Exception {
         UserRequest userRequest = new UserRequest();
         userRequest.setUsername("newuser");

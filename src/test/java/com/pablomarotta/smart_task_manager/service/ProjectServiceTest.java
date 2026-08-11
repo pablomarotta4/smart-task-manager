@@ -133,7 +133,7 @@ class ProjectServiceTest {
 
         when(projectRepository.findByOwnerUsernameOrderByCreatedAtDesc("testuser"))
                 .thenReturn(Arrays.asList(project2, project));
-        when(taskRepository.countTasksByProject()).thenReturn(List.of(
+        when(taskRepository.countTasksByProjectOwnerUsername("testuser")).thenReturn(List.of(
                 taskCount(1L, 3L),
                 taskCount(2L, 6L)
         ));
@@ -151,7 +151,8 @@ class ProjectServiceTest {
         assertEquals(3L, projects.get(1).getTaskCount());
         verify(projectRepository).findByOwnerUsernameOrderByCreatedAtDesc("testuser");
         verify(projectRepository, never()).findAll();
-        verify(taskRepository, times(1)).countTasksByProject();
+        verify(taskRepository).countTasksByProjectOwnerUsername("testuser");
+        verify(taskRepository, never()).countTasksByProject();
     }
 
     @Test

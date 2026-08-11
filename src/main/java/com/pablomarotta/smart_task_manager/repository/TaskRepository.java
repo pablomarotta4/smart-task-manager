@@ -5,6 +5,7 @@ import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
@@ -55,4 +56,12 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             group by task.project.id
             """)
     List<ProjectTaskCount> countTasksByProject();
+
+    @Query("""
+            select task.project.id as projectId, count(task.id) as taskCount
+            from Task task
+            where task.project.owner.username = :username
+            group by task.project.id
+            """)
+    List<ProjectTaskCount> countTasksByProjectOwnerUsername(@Param("username") String username);
 }
