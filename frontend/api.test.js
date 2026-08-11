@@ -237,4 +237,61 @@ describe("project API client", () => {
     );
     expect(fetchImpl.mock.calls[0][1]).not.toHaveProperty("body");
   });
+
+  it("manages project participation without listing global users", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ userId: 1, username: "alice" }]))
+      .mockResolvedValueOnce(jsonResponse({ userId: 2, username: "bob" }, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.getProjectMembers({ token: "jwt-token", projectId: "team/20" });
+    await client.addProjectMember({
+      token: "jwt-token",
+      projectId: "team/20",
+      username: "bob",
+    });
+    await client.removeProjectMember({
+      token: "jwt-token",
+      projectId: "team/20",
+      userId: "user/2",
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/projects/team%2F20/members",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/projects/team%2F20/members",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ username: "bob" }) }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "http://api.test/api/projects/team%2F20/members/user%2F2",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("loads the principal queue and assigns tickets", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ id: 201, assigneeUsername: "alice" }]))
+      .mockResolvedValueOnce(jsonResponse({ id: 201, assigneeId: 2 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.getMyWork({ token: "jwt-token" });
+    await client.assignTask({ token: "jwt-token", taskId: "task/201", userId: "user/2" });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/tasks/my-work",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/tasks/task%2F201/assign?userId=user%2F2",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
 });

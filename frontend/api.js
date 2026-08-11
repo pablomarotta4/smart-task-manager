@@ -78,11 +78,28 @@ export const createApiClient = ({
         method: "DELETE",
         token,
       }),
+    getProjectMembers: ({ token, projectId }) =>
+      request(`/api/projects/${encodeURIComponent(projectId)}/members`, {
+        method: "GET",
+        token,
+      }),
+    addProjectMember: ({ token, projectId, username }) =>
+      request(`/api/projects/${encodeURIComponent(projectId)}/members`, {
+        method: "POST",
+        token,
+        body: { username },
+      }),
+    removeProjectMember: ({ token, projectId, userId }) =>
+      request(
+        `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+        { method: "DELETE", token },
+      ),
     getProjectTasks: ({ token, projectId }) =>
       request(`/api/tasks/project/${encodeURIComponent(projectId)}`, {
         method: "GET",
         token,
       }),
+    getMyWork: ({ token }) => request("/api/tasks/my-work", { method: "GET", token }),
     createTask: ({ token, task }) =>
       request("/api/tasks/newtask", { method: "POST", token, body: task }),
     updateTask: ({ token, taskId, task }) =>
@@ -94,6 +111,13 @@ export const createApiClient = ({
     updateTaskStatus: ({ token, taskId, status }) =>
       request(
         `/api/tasks/${encodeURIComponent(taskId)}/status?status=${encodeURIComponent(status)}`,
+        { method: "PATCH", token },
+      ),
+    assignTask: ({ token, taskId, userId }) =>
+      request(
+        `/api/tasks/${encodeURIComponent(taskId)}/assign${
+          userId == null ? "" : `?userId=${encodeURIComponent(userId)}`
+        }`,
         { method: "PATCH", token },
       ),
     deleteTask: ({ token, taskId }) =>
