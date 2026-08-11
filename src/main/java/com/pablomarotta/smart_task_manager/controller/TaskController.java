@@ -35,6 +35,12 @@ public class TaskController {
         return taskService.getAllTasks(principal.getName());
     }
 
+    @GetMapping("/my-work")
+    public List<TaskResponse> getMyWork(Principal principal) {
+        log.info("Fetching assigned work for current user");
+        return taskService.getMyWork(principal.getName());
+    }
+
     @GetMapping("/project/{projectId}")
     public List<TaskResponse> getTasksByProject(@PathVariable Long projectId, Principal principal) {
         log.info("Fetching tasks for project: {}", projectId);

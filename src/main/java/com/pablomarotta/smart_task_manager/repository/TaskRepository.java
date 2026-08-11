@@ -31,6 +31,8 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     List<Task> findByAssigneeIdAndProjectOwnerUsername(Long assigneeId, String username);
 
+    List<Task> findByAssigneeUsernameOrderByDueDateAscPositionAsc(String username);
+
     List<Task> findByStatus(Status status);
 
     List<Task> findByStatusAndProjectOwnerUsername(Status status, String username);

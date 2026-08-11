@@ -129,6 +129,45 @@ class TaskServiceTest {
     }
 
     @Test
+    void getMyWorkReturnsAssignedTasksAcrossProjectsWithPlanningDetails() {
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        Project firstProject = ownedProject();
+        Project secondProject = Project.builder()
+                .id(21L)
+                .name("Launch plan")
+                .owner(User.builder().id(3L).username("carol").build())
+                .build();
+        Task first = task(101L, firstProject, "discover-jobs", "Discover target jobs", 0);
+        Task second = task(202L, secondProject, "publish-release", "Publish release", 1);
+        first.setAssignee(member);
+        second.setAssignee(member);
+        TaskAcceptanceCriterion criterion = TaskAcceptanceCriterion.builder()
+                .task(second)
+                .criterion("Release notes are published")
+                .position(0)
+                .build();
+        TaskDependency dependency = TaskDependency.builder()
+                .task(second)
+                .dependsOnTask(first)
+                .build();
+        when(taskRepository.findByAssigneeUsernameOrderByDueDateAscPositionAsc("bob"))
+                .thenReturn(List.of(first, second));
+        when(acceptanceCriterionRepository.findByTaskAssigneeUsername("bob"))
+                .thenReturn(List.of(criterion));
+        when(dependencyRepository.findByTaskAssigneeUsername("bob"))
+                .thenReturn(List.of(dependency));
+
+        List<TaskResponse> response = taskService.getMyWork("bob");
+
+        assertEquals(List.of(101L, 202L), response.stream().map(TaskResponse::getId).toList());
+        assertEquals("Job Application Tracker", response.getFirst().getProjectName());
+        assertEquals("Launch plan", response.getLast().getProjectName());
+        assertEquals(new BigDecimal("4.50"), response.getLast().getEstimatedHours());
+        assertEquals(List.of("Release notes are published"), response.getLast().getAcceptanceCriteria());
+        assertEquals(List.of("discover-jobs"), response.getLast().getDependsOn());
+    }
+
+    @Test
     void createTaskRejectsForeignProjectBeforeCallingAi() {
         TaskRequest request = taskRequest();
         when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))

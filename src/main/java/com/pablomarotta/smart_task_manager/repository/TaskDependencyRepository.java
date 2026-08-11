@@ -18,4 +18,14 @@ public interface TaskDependencyRepository extends JpaRepository<TaskDependency, 
             order by task.position, dependsOnTask.position
             """)
     List<TaskDependency> findByProjectId(@Param("projectId") Long projectId);
+
+    @Query("""
+            select dependency
+            from TaskDependency dependency
+            join fetch dependency.task task
+            join fetch dependency.dependsOnTask dependsOnTask
+            where task.assignee.username = :username
+            order by task.dueDate, task.position, dependsOnTask.position
+            """)
+    List<TaskDependency> findByTaskAssigneeUsername(@Param("username") String username);
 }

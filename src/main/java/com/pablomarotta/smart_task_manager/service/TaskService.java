@@ -127,6 +127,39 @@ public class TaskService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<TaskResponse> getMyWork(String username) {
+        List<Task> tasks = taskRepository.findByAssigneeUsernameOrderByDueDateAscPositionAsc(username);
+        Map<Long, List<String>> acceptanceCriteria = acceptanceCriterionRepository
+                .findByTaskAssigneeUsername(username)
+                .stream()
+                .collect(Collectors.groupingBy(
+                        criterion -> criterion.getTask().getId(),
+                        Collectors.mapping(
+                                com.pablomarotta.smart_task_manager.model.TaskAcceptanceCriterion::getCriterion,
+                                Collectors.toList()
+                        )
+                ));
+        Map<Long, List<String>> dependencies = dependencyRepository
+                .findByTaskAssigneeUsername(username)
+                .stream()
+                .collect(Collectors.groupingBy(
+                        dependency -> dependency.getTask().getId(),
+                        Collectors.mapping(
+                                dependency -> dependency.getDependsOnTask().getPlanningClientId(),
+                                Collectors.toList()
+                        )
+                ));
+
+        return tasks.stream()
+                .map(task -> mapToProjectResponse(
+                        task,
+                        acceptanceCriteria.getOrDefault(task.getId(), List.of()),
+                        dependencies.getOrDefault(task.getId(), List.of())
+                ))
+                .toList();
+    }
+
     public List<UserResponse> getAllUsersInProject(Long projectId, String username) {
         var project = getOwnedProject(projectId, username);
         Map<Long, com.pablomarotta.smart_task_manager.model.User> projectUsers = new LinkedHashMap<>();

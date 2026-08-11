@@ -68,6 +68,7 @@ class TaskControllerTest {
         mockMvc.perform(get("/api/tasks/user/2").principal(principal)).andExpect(status().isOk());
         mockMvc.perform(get("/api/tasks/status/todo").principal(principal)).andExpect(status().isOk());
         mockMvc.perform(get("/api/tasks/project/20/users").principal(principal)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/tasks/my-work").principal(principal)).andExpect(status().isOk());
         mockMvc.perform(get("/api/tasks/101").principal(principal)).andExpect(status().isOk());
 
         verify(taskService).getAllTasks("alice");
@@ -75,6 +76,7 @@ class TaskControllerTest {
         verify(taskService).getTasksByUserId(2L, "alice");
         verify(taskService).getTodoTasks("alice");
         verify(taskService).getAllUsersInProject(20L, "alice");
+        verify(taskService).getMyWork("alice");
         verify(taskService).getTaskById(101L, "alice");
     }
 
