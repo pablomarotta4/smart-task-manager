@@ -209,6 +209,30 @@ class ProjectGenerationControllerTest {
     }
 
     @Test
+    void retriesAnEligibleRunAsItsAuthenticatedOwner() throws Exception {
+        var aiResponse = PlanningTestFixtures.response(runId);
+        when(generationService.retryDraft(runId, "alice")).thenReturn(
+                new ProjectGenerationDraftResponse(
+                        runId,
+                        ProjectGenerationStatus.DRAFT_READY,
+                        aiResponse.draft(),
+                        aiResponse.quality(),
+                        aiResponse.revisionCount(),
+                        aiResponse.model()
+                )
+        );
+
+        mockMvc.perform(post("/api/project-generation-runs/{runId}/retry", runId)
+                        .principal(new UsernamePasswordAuthenticationToken("alice", "ignored")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").value(runId.toString()))
+                .andExpect(jsonPath("$.status").value("DRAFT_READY"))
+                .andExpect(jsonPath("$.draft.name").value("Budget App"));
+
+        verify(generationService).retryDraft(runId, "alice");
+    }
+
+    @Test
     void confirmAcceptsEditedDraftAndReturnsCreatedProjectAndTickets() throws Exception {
         when(confirmationService.confirm(eq(runId), eq("alice"), any())).thenReturn(
                 new ProjectGenerationConfirmationResponse(

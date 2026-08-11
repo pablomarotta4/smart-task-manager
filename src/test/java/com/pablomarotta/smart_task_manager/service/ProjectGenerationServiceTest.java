@@ -50,6 +50,8 @@ class ProjectGenerationServiceTest {
     private AIPlanningClient aiPlanningClient;
     @Mock
     private ProjectPlanningContextService contextService;
+    @Mock
+    private ProjectGenerationRunRetryClaimService retryClaimService;
 
     private ProjectGenerationService service;
     private User owner;
@@ -61,6 +63,7 @@ class ProjectGenerationServiceTest {
                 userRepository,
                 aiPlanningClient,
                 contextService,
+                retryClaimService,
                 new ObjectMapper().findAndRegisterModules()
         );
         owner = User.builder().id(7L).username("alice").email("alice@example.com")
@@ -113,6 +116,25 @@ class ProjectGenerationServiceTest {
     }
 
     @Test
+    void generateDraftDoesNotLeaveUnexpectedPlanningFailureProcessing() {
+        when(userRepository.findByUsername("alice")).thenReturn(Optional.of(owner));
+        when(aiPlanningClient.generatePlan(any(UUID.class), any(String.class)))
+                .thenThrow(new IllegalStateException("unexpected provider payload"));
+
+        assertThrows(
+                AIPlanningUnavailableException.class,
+                () -> service.generateDraft("alice", "Build a useful household budget application")
+        );
+
+        ArgumentCaptor<ProjectGenerationRun> runCaptor = ArgumentCaptor.forClass(
+                ProjectGenerationRun.class
+        );
+        verify(runRepository, org.mockito.Mockito.times(2)).save(runCaptor.capture());
+        assertEquals(ProjectGenerationStatus.FAILED, runCaptor.getValue().getStatus());
+        assertEquals("AI_PLANNING_FAILED", runCaptor.getValue().getErrorCode());
+    }
+
+    @Test
     void generateExistingTaskDraftPersistsAuthorizedTargetAndStructuredContext() {
         Project project = Project.builder().id(20L).name("Budget App").owner(owner).build();
         com.pablomarotta.smart_task_manager.model.Task target =
@@ -155,6 +177,44 @@ class ProjectGenerationServiceTest {
         assertEquals(target, stored.getTargetTask());
         assertEquals("a".repeat(64), stored.getContextHash());
         verify(aiPlanningClient).generatePlan(stored.getId(), stored.getPrompt(), context);
+    }
+
+    @Test
+    void retryUsesTheClaimedRunIdAndRefreshedContext() {
+        Project project = Project.builder().id(20L).name("Budget App").owner(owner).build();
+        var target = com.pablomarotta.smart_task_manager.model.Task.builder()
+                .id(201L)
+                .project(project)
+                .title("Import bank transactions")
+                .build();
+        AIPlanningContext context = new AIPlanningContext(
+                ProjectGenerationMode.EXISTING_TASK,
+                new PlanningProjectSnapshot(20L, "Budget App", "Manage household spending"),
+                201L,
+                List.of()
+        );
+        ProjectGenerationRun failedRun = ProjectGenerationRun.builder()
+                .id(UUID.randomUUID())
+                .requestedBy(owner)
+                .prompt("Break this ticket into implementation steps")
+                .mode(ProjectGenerationMode.EXISTING_TASK)
+                .status(ProjectGenerationStatus.PROCESSING)
+                .project(project)
+                .targetTask(target)
+                .attemptCount(2)
+                .build();
+        when(retryClaimService.claim(failedRun.getId(), "alice")).thenReturn(
+                new ProjectGenerationRunRetryClaimService.RetryClaim(failedRun, context)
+        );
+        when(aiPlanningClient.generatePlan(failedRun.getId(), failedRun.getPrompt(), context))
+                .thenReturn(PlanningTestFixtures.response(failedRun.getId()));
+
+        ProjectGenerationDraftResponse result = service.retryDraft(failedRun.getId(), "alice");
+
+        assertEquals(failedRun.getId(), result.runId());
+        assertEquals(ProjectGenerationStatus.DRAFT_READY, result.status());
+        assertEquals(2, failedRun.getAttemptCount());
+        verify(aiPlanningClient).generatePlan(failedRun.getId(), failedRun.getPrompt(), context);
     }
 
 }

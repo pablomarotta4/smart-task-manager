@@ -79,6 +79,14 @@ public class ProjectGenerationController {
         );
     }
 
+    @PostMapping("/{runId}/retry")
+    public ProjectGenerationDraftResponse retry(
+            @PathVariable UUID runId,
+            Authentication authentication
+    ) {
+        return generationService.retryDraft(runId, authentication.getName());
+    }
+
     @PostMapping("/{runId}/confirm")
     public ResponseEntity<ProjectGenerationConfirmationResponse> confirm(
             @PathVariable UUID runId,
