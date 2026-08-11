@@ -5,8 +5,10 @@ import com.pablomarotta.smart_task_manager.dto.ProjectResponse;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
+import com.pablomarotta.smart_task_manager.model.ProjectMembership;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
+import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,7 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final UserRepository userRepository;
     private final TaskRepository taskRepository;
+    private final ProjectMembershipRepository membershipRepository;
 
     @Transactional
     public ProjectResponse createProject(ProjectRequest projectRequest, String username) {
@@ -38,6 +41,10 @@ public class ProjectService {
                     .owner(owner)
                     .build();
             Project savedProject = projectRepository.save(project);
+            membershipRepository.save(ProjectMembership.builder()
+                    .project(savedProject)
+                    .user(owner)
+                    .build());
             return mapToResponse(savedProject, 0);
         } catch (UserNotFoundException e) {
             throw e;

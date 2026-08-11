@@ -7,12 +7,14 @@ import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationConfirm
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectPlanDraft;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
+import com.pablomarotta.smart_task_manager.model.ProjectMembership;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.model.TaskAcceptanceCriterion;
 import com.pablomarotta.smart_task_manager.model.TaskDependency;
 import com.pablomarotta.smart_task_manager.repository.ProjectGenerationRunRepository;
+import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
@@ -40,6 +42,7 @@ public class ProjectGenerationConfirmationService {
     private final TaskRepository taskRepository;
     private final TaskAcceptanceCriterionRepository criterionRepository;
     private final TaskDependencyRepository dependencyRepository;
+    private final ProjectMembershipRepository membershipRepository;
     private final ObjectMapper objectMapper;
 
     public ProjectGenerationConfirmationService(
@@ -48,6 +51,7 @@ public class ProjectGenerationConfirmationService {
             TaskRepository taskRepository,
             TaskAcceptanceCriterionRepository criterionRepository,
             TaskDependencyRepository dependencyRepository,
+            ProjectMembershipRepository membershipRepository,
             ObjectMapper objectMapper
     ) {
         this.runRepository = runRepository;
@@ -55,6 +59,7 @@ public class ProjectGenerationConfirmationService {
         this.taskRepository = taskRepository;
         this.criterionRepository = criterionRepository;
         this.dependencyRepository = dependencyRepository;
+        this.membershipRepository = membershipRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -85,6 +90,10 @@ public class ProjectGenerationConfirmationService {
                 .name(draft.name().trim())
                 .objective(draft.objective().trim())
                 .owner(run.getRequestedBy())
+                .build());
+        membershipRepository.save(ProjectMembership.builder()
+                .project(project)
+                .user(run.getRequestedBy())
                 .build());
 
         List<Task> tasks = new ArrayList<>();

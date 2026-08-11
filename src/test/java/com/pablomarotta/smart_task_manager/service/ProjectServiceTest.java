@@ -5,7 +5,9 @@ import com.pablomarotta.smart_task_manager.dto.ProjectResponse;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
+import com.pablomarotta.smart_task_manager.model.ProjectMembership;
 import com.pablomarotta.smart_task_manager.model.User;
+import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
@@ -37,6 +39,9 @@ class ProjectServiceTest {
 
     @Mock
     private TaskRepository taskRepository;
+
+    @Mock
+    private ProjectMembershipRepository membershipRepository;
 
     @InjectMocks
     private ProjectService projectService;
@@ -83,6 +88,9 @@ class ProjectServiceTest {
         assertEquals(owner.getUsername(), response.getOwnerUsername());
         verify(userRepository, times(1)).findByUsername("testuser");
         verify(projectRepository, times(1)).save(any(Project.class));
+        verify(membershipRepository).save(argThat((ProjectMembership membership) ->
+                membership.getProject() == project && membership.getUser() == owner
+        ));
     }
 
     @Test

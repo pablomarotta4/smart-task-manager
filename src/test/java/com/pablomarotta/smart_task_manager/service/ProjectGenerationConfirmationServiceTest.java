@@ -5,11 +5,13 @@ import com.pablomarotta.smart_task_manager.PlanningTestFixtures;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationConfirmationResponse;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectPlanDraft;
 import com.pablomarotta.smart_task_manager.model.Project;
+import com.pablomarotta.smart_task_manager.model.ProjectMembership;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectGenerationRunRepository;
+import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
@@ -48,6 +50,8 @@ class ProjectGenerationConfirmationServiceTest {
     private TaskAcceptanceCriterionRepository criterionRepository;
     @Mock
     private TaskDependencyRepository dependencyRepository;
+    @Mock
+    private ProjectMembershipRepository membershipRepository;
 
     private ProjectGenerationConfirmationService service;
     private ProjectGenerationRun run;
@@ -60,6 +64,7 @@ class ProjectGenerationConfirmationServiceTest {
                 taskRepository,
                 criterionRepository,
                 dependencyRepository,
+                membershipRepository,
                 new ObjectMapper().findAndRegisterModules()
         );
         User owner = User.builder().id(7L).username("alice").email("alice@example.com")
@@ -107,6 +112,10 @@ class ProjectGenerationConfirmationServiceTest {
         ));
         verify(dependencyRepository).saveAll(org.mockito.ArgumentMatchers.argThat(
                 values -> ((List<?>) values).size() == 2
+        ));
+        verify(membershipRepository).save(org.mockito.ArgumentMatchers.argThat(
+                (ProjectMembership membership) -> membership.getProject().getId().equals(41L)
+                        && membership.getUser() == run.getRequestedBy()
         ));
         verify(runRepository).save(run);
     }
