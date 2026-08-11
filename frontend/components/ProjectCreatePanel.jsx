@@ -39,7 +39,7 @@ export default function ProjectCreatePanel({ creating, error, onCreate, onCancel
               ...current,
               name: event.target.value,
             }))}
-            maxLength={255}
+            maxLength={150}
             required
           />
         </div>

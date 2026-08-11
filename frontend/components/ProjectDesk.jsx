@@ -93,7 +93,7 @@ export default function ProjectDesk({
                   ...current,
                   name: event.target.value,
                 }))}
-                maxLength={255}
+                maxLength={150}
                 required
               />
             </div>

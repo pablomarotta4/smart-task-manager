@@ -411,7 +411,9 @@ describe("AI project workshop", () => {
     await user.click(screen.getByRole("button", { name: /^projects$/i }));
     await screen.findByRole("heading", { name: /your projects/i });
     await user.click(screen.getByRole("button", { name: /new project/i }));
-    await user.type(screen.getByLabelText(/project name/i), "Release checklist");
+    const projectName = screen.getByLabelText(/project name/i);
+    expect(projectName).toHaveAttribute("maxLength", "150");
+    await user.type(projectName, "Release checklist");
     await user.type(screen.getByLabelText(/^objective$/i), "Ship the next release with confidence");
     await user.click(screen.getByRole("button", { name: /^create project$/i }));
 
@@ -708,6 +710,7 @@ describe("AI project workshop", () => {
 
     await user.click(screen.getByRole("button", { name: /project settings/i }));
     const name = screen.getByLabelText(/project name/i);
+    expect(name).toHaveAttribute("maxLength", "150");
     await user.clear(name);
     await user.type(name, "Job search command center");
     const objective = screen.getByLabelText(/^objective$/i);
