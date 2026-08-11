@@ -10,6 +10,13 @@ import RecentPlanningRuns from "./components/RecentPlanningRuns";
 
 const SESSION_KEY = "smart-task-session";
 
+class SessionChangedError extends Error {
+  constructor() {
+    super("The authenticated session changed while this request was running");
+    this.name = "SessionChangedError";
+  }
+}
+
 const readSession = () => {
   try {
     const value = sessionStorage.getItem(SESSION_KEY);
@@ -20,8 +27,10 @@ const readSession = () => {
   }
 };
 
-const errorMessage = (error) =>
-  error instanceof Error ? error.message : "Something unexpected happened";
+const errorMessage = (error) => {
+  if (error instanceof SessionChangedError) return "";
+  return error instanceof Error ? error.message : "Something unexpected happened";
+};
 
 export default function App({ client = apiClient }) {
   const [session, setSession] = useState(readSession);
@@ -89,6 +98,7 @@ export default function App({ client = apiClient }) {
     setEditableDraft(null);
     setConfirmation(null);
     setPlanningTarget(null);
+    setPrompt("");
     setActiveView("workshop");
     setProjects([]);
     setSelectedProject(null);
@@ -108,6 +118,7 @@ export default function App({ client = apiClient }) {
     setProjectPhase("idle");
     setProjectMutationError("");
     setProjectMutationPhase("idle");
+    setAuthMode("login");
     setCredentials((current) => ({ ...current, password: "" }));
     setRegistration({ fullName: "", email: "", username: "", password: "" });
     setError("");
@@ -120,7 +131,7 @@ export default function App({ client = apiClient }) {
     const pendingRefresh = client.refreshSession()
       .then((authenticated) => {
         if (sessionRequestId.current !== requestId) {
-          throw new ApiError("Session changed while it was being refreshed", { status: 401 });
+          throw new SessionChangedError();
         }
         persistSession(authenticated);
         return authenticated.token;
@@ -138,9 +149,19 @@ export default function App({ client = apiClient }) {
     if (!sessionToken) {
       throw new ApiError("Your session expired. Sign in again.", { status: 401 });
     }
+    const requestId = sessionRequestId.current;
+    const returnForCurrentSession = (result) => {
+      if (sessionRequestId.current !== requestId) {
+        throw new SessionChangedError();
+      }
+      return result;
+    };
     try {
-      return await operation(sessionToken);
+      return returnForCurrentSession(await operation(sessionToken));
     } catch (requestError) {
+      if (sessionRequestId.current !== requestId || requestError instanceof SessionChangedError) {
+        throw new SessionChangedError();
+      }
       if (!(requestError instanceof ApiError) || requestError.status !== 401) {
         throw requestError;
       }
@@ -148,8 +169,11 @@ export default function App({ client = apiClient }) {
 
     try {
       const renewedToken = await refreshAccessToken();
-      return await operation(renewedToken);
+      return returnForCurrentSession(await operation(renewedToken));
     } catch (requestError) {
+      if (sessionRequestId.current !== requestId || requestError instanceof SessionChangedError) {
+        throw new SessionChangedError();
+      }
       if (requestError instanceof ApiError && requestError.status === 401) {
         clearWorkspaceSession("Your session expired. Sign in again.");
         throw new ApiError("Your session expired. Sign in again.", { status: 401 });

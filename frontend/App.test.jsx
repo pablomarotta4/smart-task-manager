@@ -629,6 +629,42 @@ describe("AI project workshop", () => {
       .not.toBeInTheDocument();
   });
 
+  it("ignores a protected response that resolves after another account signs in", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveOldGeneration;
+    client.generateProject.mockReturnValue(new Promise((resolve) => {
+      resolveOldGeneration = resolve;
+    }));
+    client.login
+      .mockResolvedValueOnce(authenticatedUser)
+      .mockResolvedValueOnce({
+        token: "second-user-token",
+        user: { id: 22, username: "second-user", fullName: "Second User" },
+      });
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.type(
+      screen.getByLabelText(/describe your project/i),
+      "Build a complete project that belongs only to the first account",
+    );
+    await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+    await user.click(screen.getByRole("button", { name: /log out/i }));
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    expect(await screen.findByText("Second User")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOldGeneration(generatedDraft);
+    });
+
+    expect(screen.queryByRole("heading", { name: "Kitchen Redesign Project" }))
+      .not.toBeInTheDocument();
+    expect(sessionStorage.getItem("smart-task-session")).toContain("second-user-token");
+  });
+
   it("shows quality evidence and lets the user edit ticket content", async () => {
     const user = userEvent.setup();
     const client = createClient();
