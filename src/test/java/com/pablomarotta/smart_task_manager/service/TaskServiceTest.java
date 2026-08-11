@@ -74,6 +74,7 @@ class TaskServiceTest {
         Project project = ownedProject();
         Task discoverJobs = task(101L, project, "discover-jobs", "Discover target jobs", 0);
         Task trackApplications = task(102L, project, "track-applications", "Track applications", 1);
+        trackApplications.setParentTask(discoverJobs);
 
         TaskAcceptanceCriterion firstCriterion = TaskAcceptanceCriterion.builder()
                 .task(discoverJobs)
@@ -108,6 +109,7 @@ class TaskServiceTest {
                 responses.get(0).getAcceptanceCriteria()
         );
         assertEquals(List.of("discover-jobs"), responses.get(1).getDependsOn());
+        assertEquals(101L, responses.get(1).getParentTaskId());
         verify(taskRepository).findByProjectIdOrderByPositionAsc(20L);
         verify(acceptanceCriterionRepository).findByProjectId(20L);
         verify(dependencyRepository).findByProjectId(20L);

@@ -101,6 +101,9 @@ public class TaskService {
         taskResponse.setPosition(task.getPosition());
         taskResponse.setProjectId(task.getProject().getId());
         taskResponse.setProjectName(task.getProject().getName());
+        if (task.getParentTask() != null) {
+            taskResponse.setParentTaskId(task.getParentTask().getId());
+        }
 
         if (task.getAssignee() != null) {
             taskResponse.setAssigneeId(task.getAssignee().getId());

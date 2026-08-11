@@ -8,6 +8,7 @@ import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningResponse;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationDraftResponse;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
+import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectGenerationRunRepository;
@@ -42,6 +43,7 @@ public class ProjectGenerationService {
                 .id(UUID.randomUUID())
                 .requestedBy(requester)
                 .prompt(prompt.trim())
+                .mode(ProjectGenerationMode.NEW_PROJECT)
                 .status(ProjectGenerationStatus.PROCESSING)
                 .build();
         runRepository.save(run);

@@ -11,6 +11,7 @@ import com.pablomarotta.smart_task_manager.dto.planning.PlanningTicketDraft;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationDraftResponse;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectPlanDraft;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
+import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectGenerationRunRepository;
@@ -80,6 +81,7 @@ class ProjectGenerationServiceTest {
         ProjectGenerationRun stored = runCaptor.getValue();
         assertEquals(owner, stored.getRequestedBy());
         assertEquals(ProjectGenerationStatus.DRAFT_READY, stored.getStatus());
+        assertEquals(ProjectGenerationMode.NEW_PROJECT, stored.getMode());
         assertNotNull(stored.getDraftJson());
         assertEquals(null, stored.getProject());
         verify(aiPlanningClient).generatePlan(stored.getId(), stored.getPrompt());

@@ -41,6 +41,11 @@ public class ProjectGenerationRun {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
+    @Builder.Default
+    private ProjectGenerationMode mode = ProjectGenerationMode.NEW_PROJECT;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
     private ProjectGenerationStatus status;
 
     @Column(name = "draft_json", columnDefinition = "TEXT")
@@ -61,6 +66,13 @@ public class ProjectGenerationRun {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id")
     private Project project;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "target_task_id")
+    private Task targetTask;
+
+    @Column(name = "context_hash", length = 64)
+    private String contextHash;
 
     @Version
     private long version;
