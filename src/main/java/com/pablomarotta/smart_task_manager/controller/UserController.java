@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
@@ -27,6 +28,7 @@ public class UserController {
 
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
+    @PreAuthorize("hasRole('ADMIN')")
     public List<UserResponse> getAllUsers() {
         log.info("Retrieving all users");
         return userService.getAllUsers();
@@ -34,6 +36,7 @@ public class UserController {
 
     @GetMapping("/username/{username}")
     @ResponseStatus(HttpStatus.OK)
+    @PreAuthorize("#username == authentication.name or hasRole('ADMIN')")
     public UserResponse getUserByUsername(@PathVariable String username) {
         if (username == null || username.isEmpty()) {
             throw new IllegalArgumentException("Username cannot be null or empty");
@@ -44,6 +47,7 @@ public class UserController {
 
     @PutMapping("/{username}")
     @ResponseStatus(HttpStatus.OK)
+    @PreAuthorize("#username == authentication.name or hasRole('ADMIN')")
     public UserResponse updateUser(@PathVariable String username, @Valid @RequestBody UserRequest userRequest) {
         log.info("Updating user with username: {}", username);
         return userService.updateUser(username, userRequest);
@@ -51,6 +55,7 @@ public class UserController {
 
     @DeleteMapping("/{username}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("#username == authentication.name or hasRole('ADMIN')")
     public void deleteUser(@PathVariable String username) {
         log.info("Deactivating user with username: {}", username);
         userService.deleteUser(username);
