@@ -33,7 +33,8 @@ public class ProjectService {
                     .orElseThrow(() -> new UserNotFoundException("User not found with username: " + username));
 
             Project project = Project.builder()
-                    .name(projectRequest.getName())
+                    .name(projectRequest.getName().trim())
+                    .objective(normalizeObjective(projectRequest.getObjective()))
                     .owner(owner)
                     .build();
             Project savedProject = projectRepository.save(project);
@@ -65,9 +66,35 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public ProjectResponse getProjectById(Long id, String username) {
-        Project project = projectRepository.findByIdAndOwnerUsername(id, username)
-                .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + id));
+        Project project = getOwnedProject(id, username);
         return mapToResponse(project, taskRepository.countByProjectId(id));
+    }
+
+    @Transactional
+    public ProjectResponse updateProject(Long id, ProjectRequest projectRequest, String username) {
+        Project project = getOwnedProject(id, username);
+        project.setName(projectRequest.getName().trim());
+        project.setObjective(normalizeObjective(projectRequest.getObjective()));
+        Project savedProject = projectRepository.save(project);
+        return mapToResponse(savedProject, taskRepository.countByProjectId(id));
+    }
+
+    @Transactional
+    public void deleteProject(Long id, String username) {
+        Project project = getOwnedProject(id, username);
+        projectRepository.delete(project);
+    }
+
+    private Project getOwnedProject(Long id, String username) {
+        return projectRepository.findByIdAndOwnerUsername(id, username)
+                .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + id));
+    }
+
+    private String normalizeObjective(String objective) {
+        if (objective == null || objective.isBlank()) {
+            return null;
+        }
+        return objective.trim();
     }
 
     private ProjectResponse mapToResponse(Project project, long taskCount) {

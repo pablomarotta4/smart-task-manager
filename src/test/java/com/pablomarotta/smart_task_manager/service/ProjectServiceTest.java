@@ -54,12 +54,14 @@ class ProjectServiceTest {
         project = Project.builder()
                 .id(1L)
                 .name("Test Project")
+                .objective("Deliver the first useful release")
                 .owner(owner)
                 .createdAt(java.time.LocalDateTime.now())
                 .build();
 
         projectRequest = new ProjectRequest();
         projectRequest.setName("Test Project");
+        projectRequest.setObjective("Deliver the first useful release");
         projectRequest.setUsername("testuser");
     }
 
@@ -76,10 +78,28 @@ class ProjectServiceTest {
         assertNotNull(response);
         assertEquals(project.getId(), response.getId());
         assertEquals(project.getName(), response.getName());
+        assertEquals(project.getObjective(), response.getObjective());
         assertEquals(owner.getId(), response.getOwnerId());
         assertEquals(owner.getUsername(), response.getOwnerUsername());
         verify(userRepository, times(1)).findByUsername("testuser");
         verify(projectRepository, times(1)).save(any(Project.class));
+    }
+
+    @Test
+    void createProject_PersistsManualObjective() {
+        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(owner));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> {
+            Project saved = invocation.getArgument(0);
+            saved.setId(1L);
+            return saved;
+        });
+
+        ProjectResponse response = projectService.createProject(projectRequest, "testuser");
+
+        assertEquals("Deliver the first useful release", response.getObjective());
+        verify(projectRepository).save(argThat(saved ->
+                "Deliver the first useful release".equals(saved.getObjective())
+        ));
     }
 
     @Test
@@ -182,6 +202,60 @@ class ProjectServiceTest {
             projectService.getProjectById(99L, "testuser");
         });
         verify(projectRepository).findByIdAndOwnerUsername(99L, "testuser");
+    }
+
+    @Test
+    void updateProject_ChangesOwnedProject() {
+        ProjectRequest update = new ProjectRequest();
+        update.setName("Renamed Project");
+        update.setObjective("Ship the revised outcome");
+        when(projectRepository.findByIdAndOwnerUsername(1L, "testuser"))
+                .thenReturn(Optional.of(project));
+        when(projectRepository.save(project)).thenReturn(project);
+        when(taskRepository.countByProjectId(1L)).thenReturn(3L);
+
+        ProjectResponse response = projectService.updateProject(1L, update, "testuser");
+
+        assertEquals("Renamed Project", response.getName());
+        assertEquals("Ship the revised outcome", response.getObjective());
+        assertEquals(3L, response.getTaskCount());
+        verify(projectRepository).save(project);
+    }
+
+    @Test
+    void updateProject_RejectsForeignProjectWithoutWriting() {
+        when(projectRepository.findByIdAndOwnerUsername(1L, "testuser"))
+                .thenReturn(Optional.empty());
+
+        assertThrows(
+                ProjectNotFoundException.class,
+                () -> projectService.updateProject(1L, projectRequest, "testuser")
+        );
+
+        verify(projectRepository, never()).save(any());
+    }
+
+    @Test
+    void deleteProject_RemovesOwnedProject() {
+        when(projectRepository.findByIdAndOwnerUsername(1L, "testuser"))
+                .thenReturn(Optional.of(project));
+
+        projectService.deleteProject(1L, "testuser");
+
+        verify(projectRepository).delete(project);
+    }
+
+    @Test
+    void deleteProject_RejectsForeignProjectWithoutWriting() {
+        when(projectRepository.findByIdAndOwnerUsername(1L, "testuser"))
+                .thenReturn(Optional.empty());
+
+        assertThrows(
+                ProjectNotFoundException.class,
+                () -> projectService.deleteProject(1L, "testuser")
+        );
+
+        verify(projectRepository, never()).delete(any());
     }
 
     private TaskRepository.ProjectTaskCount taskCount(Long projectId, Long taskCount) {

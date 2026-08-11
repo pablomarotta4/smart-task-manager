@@ -39,4 +39,21 @@ public class ProjectController {
         log.info("Fetching project with id: {}", id);
         return projectService.getProjectById(id, principal.getName());
     }
+
+    @PutMapping("/{id}")
+    public ProjectResponse updateProject(
+            @PathVariable Long id,
+            @Valid @RequestBody ProjectRequest projectRequest,
+            Principal principal
+    ) {
+        log.info("Updating project with id: {}", id);
+        return projectService.updateProject(id, projectRequest, principal.getName());
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteProject(@PathVariable Long id, Principal principal) {
+        log.info("Deleting project with id: {}", id);
+        projectService.deleteProject(id, principal.getName());
+    }
 }

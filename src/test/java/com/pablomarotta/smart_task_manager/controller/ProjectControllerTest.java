@@ -49,11 +49,13 @@ class ProjectControllerTest {
 
         projectRequest = new ProjectRequest();
         projectRequest.setName("Test Project");
+        projectRequest.setObjective("Deliver the first useful release");
         projectRequest.setUsername("testuser");
         
         projectResponse = new ProjectResponse();
         projectResponse.setId(1L);
         projectResponse.setName("Test Project");
+        projectResponse.setObjective("Deliver the first useful release");
         projectResponse.setOwnerId(1L);
         projectResponse.setOwnerUsername("testuser");
     }
@@ -70,6 +72,7 @@ class ProjectControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.name").value("Test Project"))
+                .andExpect(jsonPath("$.objective").value("Deliver the first useful release"))
                 .andExpect(jsonPath("$.ownerId").value(1))
                 .andExpect(jsonPath("$.ownerUsername").value("testuser"));
 
@@ -135,5 +138,29 @@ class ProjectControllerTest {
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Project not found with id: 99"));
+    }
+
+    @Test
+    void updateProject_UsesAuthenticatedUsername() throws Exception {
+        when(projectService.updateProject(eq(1L), any(ProjectRequest.class), eq("testuser")))
+                .thenReturn(projectResponse);
+
+        mockMvc.perform(put("/api/projects/1")
+                        .principal(new UsernamePasswordAuthenticationToken("testuser", "ignored"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(projectRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1));
+
+        verify(projectService).updateProject(eq(1L), any(ProjectRequest.class), eq("testuser"));
+    }
+
+    @Test
+    void deleteProject_UsesAuthenticatedUsername() throws Exception {
+        mockMvc.perform(delete("/api/projects/1")
+                        .principal(new UsernamePasswordAuthenticationToken("testuser", "ignored")))
+                .andExpect(status().isNoContent());
+
+        verify(projectService).deleteProject(1L, "testuser");
     }
 }
