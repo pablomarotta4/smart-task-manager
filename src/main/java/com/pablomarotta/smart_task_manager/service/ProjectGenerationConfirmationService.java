@@ -7,6 +7,7 @@ import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationConfirm
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectPlanDraft;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
+import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectMembership;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.Status;
@@ -32,6 +33,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,6 +45,7 @@ public class ProjectGenerationConfirmationService {
     private final TaskAcceptanceCriterionRepository criterionRepository;
     private final TaskDependencyRepository dependencyRepository;
     private final ProjectMembershipRepository membershipRepository;
+    private final ProjectPlanningContextService contextService;
     private final ObjectMapper objectMapper;
 
     public ProjectGenerationConfirmationService(
@@ -52,6 +55,7 @@ public class ProjectGenerationConfirmationService {
             TaskAcceptanceCriterionRepository criterionRepository,
             TaskDependencyRepository dependencyRepository,
             ProjectMembershipRepository membershipRepository,
+            ProjectPlanningContextService contextService,
             ObjectMapper objectMapper
     ) {
         this.runRepository = runRepository;
@@ -60,6 +64,7 @@ public class ProjectGenerationConfirmationService {
         this.criterionRepository = criterionRepository;
         this.dependencyRepository = dependencyRepository;
         this.membershipRepository = membershipRepository;
+        this.contextService = contextService;
         this.objectMapper = objectMapper;
     }
 
@@ -86,15 +91,10 @@ public class ProjectGenerationConfirmationService {
         }
         validateTicketGraph(draft);
 
-        Project project = projectRepository.save(Project.builder()
-                .name(draft.name().trim())
-                .objective(draft.objective().trim())
-                .owner(run.getRequestedBy())
-                .build());
-        membershipRepository.save(ProjectMembership.builder()
-                .project(project)
-                .user(run.getRequestedBy())
-                .build());
+        ConfirmationTarget confirmationTarget = run.getMode() == ProjectGenerationMode.EXISTING_TASK
+                ? prepareExistingProject(run, username, draft)
+                : createProject(run, draft);
+        Project project = confirmationTarget.project();
 
         List<Task> tasks = new ArrayList<>();
         for (int index = 0; index < draft.tickets().size(); index++) {
@@ -105,13 +105,14 @@ public class ProjectGenerationConfirmationService {
                     .description(ticket.description().trim())
                     .status(Status.TODO)
                     .priority(ticket.priority())
-                    .position(index)
+                    .position(confirmationTarget.firstPosition() + index)
                     .createdBy(run.getRequestedBy())
                     .dueDate(ticket.dueInDays() == null ? null : LocalDate.now().plusDays(ticket.dueInDays()))
                     .category(ticket.category())
                     .planningClientId(ticket.clientId())
                     .estimatedHours(BigDecimal.valueOf(ticket.estimatedHours()))
                     .generationRun(run)
+                    .parentTask(confirmationTarget.parentTask())
                     .build());
         }
         List<Task> savedTasks = taskRepository.saveAll(tasks);
@@ -146,6 +147,62 @@ public class ProjectGenerationConfirmationService {
         run.setStatus(ProjectGenerationStatus.CONFIRMED);
         runRepository.save(run);
         return response(run, savedTasks.stream().map(Task::getId).toList(), false);
+    }
+
+    private ConfirmationTarget createProject(
+            ProjectGenerationRun run,
+            ProjectPlanDraft draft
+    ) {
+        Project project = projectRepository.save(Project.builder()
+                .name(draft.name().trim())
+                .objective(draft.objective().trim())
+                .owner(run.getRequestedBy())
+                .build());
+        membershipRepository.save(ProjectMembership.builder()
+                .project(project)
+                .user(run.getRequestedBy())
+                .build());
+        return new ConfirmationTarget(project, null, 0);
+    }
+
+    private ConfirmationTarget prepareExistingProject(
+            ProjectGenerationRun run,
+            String username,
+            ProjectPlanDraft draft
+    ) {
+        if (run.getProject() == null
+                || run.getTargetTask() == null
+                || run.getContextHash() == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "The selected planning target is no longer available"
+            );
+        }
+        ProjectPlanningContextService.CapturedContext current = contextService.capture(
+                run.getProject().getId(),
+                run.getTargetTask().getId(),
+                username
+        );
+        if (!Objects.equals(run.getContextHash(), current.contextHash())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Project context changed while this plan was under review"
+            );
+        }
+
+        Task targetTask = current.targetTask();
+        targetTask.setTitle(draft.name().trim());
+        targetTask.setDescription(draft.objective().trim());
+        taskRepository.save(targetTask);
+        int firstPosition = Math.toIntExact(taskRepository.countByProjectId(current.project().getId()));
+        return new ConfirmationTarget(current.project(), targetTask, firstPosition);
+    }
+
+    private record ConfirmationTarget(
+            Project project,
+            Task parentTask,
+            int firstPosition
+    ) {
     }
 
     private ProjectGenerationConfirmationResponse response(

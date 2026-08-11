@@ -7,6 +7,7 @@ import com.pablomarotta.smart_task_manager.dto.planning.ProjectPlanDraft;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectMembership;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
+import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.model.User;
@@ -52,6 +53,8 @@ class ProjectGenerationConfirmationServiceTest {
     private TaskDependencyRepository dependencyRepository;
     @Mock
     private ProjectMembershipRepository membershipRepository;
+    @Mock
+    private ProjectPlanningContextService contextService;
 
     private ProjectGenerationConfirmationService service;
     private ProjectGenerationRun run;
@@ -65,6 +68,7 @@ class ProjectGenerationConfirmationServiceTest {
                 criterionRepository,
                 dependencyRepository,
                 membershipRepository,
+                contextService,
                 new ObjectMapper().findAndRegisterModules()
         );
         User owner = User.builder().id(7L).username("alice").email("alice@example.com")
@@ -190,5 +194,99 @@ class ProjectGenerationConfirmationServiceTest {
         assertEquals(ProjectGenerationStatus.DRAFT_READY, run.getStatus());
         assertEquals(null, run.getProject());
         verify(runRepository, never()).save(run);
+    }
+
+    @Test
+    void confirmExistingTaskRefinesTargetAndAppendsLinkedChildrenToSameProject() {
+        Project project = Project.builder()
+                .id(20L)
+                .name("Budget App")
+                .objective("Manage household spending")
+                .owner(run.getRequestedBy())
+                .build();
+        Task target = Task.builder()
+                .id(201L)
+                .project(project)
+                .title("Rough import idea")
+                .description("Initial task description")
+                .build();
+        run.setMode(ProjectGenerationMode.EXISTING_TASK);
+        run.setProject(project);
+        run.setTargetTask(target);
+        run.setContextHash("a".repeat(64));
+        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(contextService.capture(20L, 201L, "alice")).thenReturn(
+                new ProjectPlanningContextService.CapturedContext(
+                        project,
+                        target,
+                        null,
+                        "a".repeat(64)
+                )
+        );
+        when(taskRepository.countByProjectId(20L)).thenReturn(2L);
+        AtomicLong taskId = new AtomicLong(300);
+        when(taskRepository.saveAll(any())).thenAnswer(invocation -> {
+            List<Task> tasks = new ArrayList<>();
+            invocation.<Iterable<Task>>getArgument(0).forEach(task -> {
+                task.setId(taskId.getAndIncrement());
+                tasks.add(task);
+            });
+            return tasks;
+        });
+
+        ProjectGenerationConfirmationResponse result = service.confirm(
+                run.getId(),
+                "alice",
+                PlanningTestFixtures.draft()
+        );
+
+        assertEquals(20L, result.projectId());
+        assertEquals("Budget App", result.projectName());
+        assertEquals(List.of(300L, 301L, 302L), result.taskIds());
+        assertEquals(PlanningTestFixtures.draft().name(), target.getTitle());
+        assertEquals(PlanningTestFixtures.draft().objective(), target.getDescription());
+        verify(taskRepository).save(target);
+        verify(taskRepository).saveAll(org.mockito.ArgumentMatchers.argThat(values -> {
+            List<Task> children = (List<Task>) values;
+            return children.size() == 3
+                    && children.stream().allMatch(task -> task.getProject() == project)
+                    && children.stream().allMatch(task -> task.getParentTask() == target)
+                    && children.stream().map(Task::getPosition).toList().equals(List.of(2, 3, 4));
+        }));
+        verify(projectRepository, never()).save(any());
+        verify(membershipRepository, never()).save(any());
+    }
+
+    @Test
+    void confirmExistingTaskRejectsStaleProjectContextBeforeWrites() {
+        Project project = Project.builder()
+                .id(20L)
+                .name("Budget App")
+                .owner(run.getRequestedBy())
+                .build();
+        Task target = Task.builder().id(201L).project(project).title("Import data").build();
+        run.setMode(ProjectGenerationMode.EXISTING_TASK);
+        run.setProject(project);
+        run.setTargetTask(target);
+        run.setContextHash("a".repeat(64));
+        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(contextService.capture(20L, 201L, "alice")).thenReturn(
+                new ProjectPlanningContextService.CapturedContext(
+                        project,
+                        target,
+                        null,
+                        "b".repeat(64)
+                )
+        );
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.confirm(run.getId(), "alice", PlanningTestFixtures.draft())
+        );
+
+        assertEquals(org.springframework.http.HttpStatus.CONFLICT, exception.getStatusCode());
+        verify(taskRepository, never()).save(any());
+        verify(taskRepository, never()).saveAll(any());
+        verify(projectRepository, never()).save(any());
     }
 }
