@@ -94,7 +94,7 @@ class SecurityTest {
     }
 
     @Test
-    void publicEndpoint_WithoutToken_ShouldReturnCreated() throws Exception {
+    void legacyUserCreationEndpoint_WithoutToken_ShouldReturnUnauthorized() throws Exception {
         UserRequest userRequest = new UserRequest();
         userRequest.setUsername("newuser");
         userRequest.setEmail("new@example.com");
@@ -108,12 +108,12 @@ class SecurityTest {
         userResponse.setFullName("New User");
         userResponse.setRole("USER");
 
-        when(userService.createUser(org.mockito.ArgumentMatchers.any())).thenReturn(userResponse);
-
         mockMvc.perform(post("/api/users")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(userRequest)))
-                .andExpect(status().isCreated());
+                .andExpect(status().isUnauthorized());
+
+        verify(userService, never()).createUser(org.mockito.ArgumentMatchers.any());
     }
 
     @Test

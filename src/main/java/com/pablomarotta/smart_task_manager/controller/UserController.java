@@ -19,13 +19,6 @@ public class UserController {
 
     private final UserService userService;
 
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public UserResponse createUser(@Valid @RequestBody UserRequest userRequest) {
-        log.info("Creating user with username: {}", userRequest.getUsername());
-        return userService.createUser(userRequest);
-    }
-
     @GetMapping
     @ResponseStatus(HttpStatus.OK)
     @PreAuthorize("hasRole('ADMIN')")
