@@ -29,6 +29,7 @@ export default function App({ client = apiClient }) {
   const [draftResponse, setDraftResponse] = useState(null);
   const [editableDraft, setEditableDraft] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
+  const [planningTarget, setPlanningTarget] = useState(null);
   const [activeView, setActiveView] = useState("workshop");
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -73,10 +74,17 @@ export default function App({ client = apiClient }) {
     setError("");
     setPhase("generating");
     try {
-      const response = await client.generateProject({
+      const generationRequest = {
         token: session.token,
         prompt: prompt.trim(),
-      });
+      };
+      const response = planningTarget
+        ? await client.generateTaskPlan({
+          ...generationRequest,
+          projectId: planningTarget.project.id,
+          taskId: planningTarget.task.id,
+        })
+        : await client.generateProject(generationRequest);
       setDraftResponse(response);
       setEditableDraft(structuredClone(response.draft));
       setConfirmation(null);
@@ -119,6 +127,7 @@ export default function App({ client = apiClient }) {
     setDraftResponse(null);
     setEditableDraft(null);
     setConfirmation(null);
+    setPlanningTarget(null);
     setError("");
     setPhase("idle");
   };
@@ -480,6 +489,7 @@ export default function App({ client = apiClient }) {
   };
 
   const handlePlanFollowUp = (project) => {
+    setPlanningTarget(null);
     setPrompt(
       `Create a follow-up project plan for "${project.name}". `
       + `Use this existing objective as context: ${project.objective || "No objective recorded"}. `
@@ -493,12 +503,28 @@ export default function App({ client = apiClient }) {
     setActiveView("workshop");
   };
 
+  const handlePlanTask = (task) => {
+    setPlanningTarget({ project: selectedProject, task });
+    setPrompt(
+      `Break "${task.title}" into an actionable implementation plan. `
+      + "Use the existing project context and avoid duplicating current work.",
+    );
+    setDraftResponse(null);
+    setEditableDraft(null);
+    setConfirmation(null);
+    setSelectedTask(null);
+    setError("");
+    setPhase("idle");
+    setActiveView("workshop");
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setSession(null);
     setDraftResponse(null);
     setEditableDraft(null);
     setConfirmation(null);
+    setPlanningTarget(null);
     setActiveView("workshop");
     setProjects([]);
     setSelectedProject(null);
@@ -694,6 +720,7 @@ export default function App({ client = apiClient }) {
           onDeleteTask={handleDeleteTask}
           onAddProjectMember={handleAddProjectMember}
           onRemoveProjectMember={handleRemoveProjectMember}
+          onPlanTask={handlePlanTask}
           onPlanFollowUp={handlePlanFollowUp}
           onUpdateProject={handleUpdateProject}
           onDeleteProject={handleDeleteProject}
@@ -722,10 +749,24 @@ export default function App({ client = apiClient }) {
       <section className="prompt-stage" aria-labelledby="prompt-title">
         <div className="prompt-heading">
           <p className="section-index">01 / Brief</p>
-          <h1 id="prompt-title">What are we building?</h1>
+          <h1 id="prompt-title">
+            {planningTarget ? "Plan this ticket" : "What are we building?"}
+          </h1>
           <p className="muted-copy">
-            Describe the outcome in everyday language. Name the capabilities that cannot be missed.
+            {planningTarget
+              ? "Describe the depth, constraints, or delivery shape you want for this ticket."
+              : "Describe the outcome in everyday language. Name the capabilities that cannot be missed."}
           </p>
+          {planningTarget ? (
+            <div className="planning-context-banner" aria-label="Planning target">
+              <span>{planningTarget.project.name}</span>
+              <strong>{planningTarget.task.title}</strong>
+              <p>
+                AI receives this ticket and the current project backlog. Nothing changes until
+                confirmation.
+              </p>
+            </div>
+          ) : null}
           <div className="prompt-principle">
             <span aria-hidden="true">✦</span>
             <p>Specific verbs make stronger tickets: list, reserve, track, schedule, approve.</p>
@@ -735,7 +776,9 @@ export default function App({ client = apiClient }) {
         <div className="prompt-workbench">
           <form onSubmit={handleGenerate}>
             <div className="prompt-label-row">
-              <label htmlFor="project-prompt">Describe your project</label>
+              <label htmlFor="project-prompt">
+                {planningTarget ? "Planning instructions" : "Describe your project"}
+              </label>
               <span>{prompt.length} / 4000</span>
             </div>
             <textarea
@@ -745,7 +788,9 @@ export default function App({ client = apiClient }) {
               minLength={10}
               maxLength={4000}
               rows={7}
-              placeholder="Build a neighborhood tool library where residents can list, reserve, borrow, and return shared tools…"
+              placeholder={planningTarget
+                ? "Split the selected ticket into a practical, dependency-aware implementation plan…"
+                : "Build a neighborhood tool library where residents can list, reserve, borrow, and return shared tools…"}
               required
             />
             <button
@@ -754,7 +799,11 @@ export default function App({ client = apiClient }) {
               disabled={phase === "generating" || prompt.trim().length < 10}
               aria-busy={phase === "generating"}
             >
-              <span>{phase === "generating" ? "Generating…" : "Generate first plan"}</span>
+              <span>
+                {phase === "generating"
+                  ? "Generating…"
+                  : (planningTarget ? "Generate task plan" : "Generate first plan")}
+              </span>
               <span aria-hidden="true">{phase === "generating" ? "◌" : "↗"}</span>
             </button>
           </form>
@@ -763,8 +812,12 @@ export default function App({ client = apiClient }) {
             <div className="generation-status" role="status">
               <span className="status-orbit" aria-hidden="true" />
               <div>
-                <strong>Building your first backlog</strong>
-                <p>Analyzing the brief, drafting tickets, and checking quality. Up to 90 seconds.</p>
+                <strong>
+                  {planningTarget ? "Building the child-ticket plan" : "Building your first backlog"}
+                </strong>
+                <p>
+                  Analyzing the brief, drafting tickets, and checking quality. Up to 90 seconds.
+                </p>
               </div>
             </div>
           ) : null}
@@ -778,6 +831,7 @@ export default function App({ client = apiClient }) {
           quality={draftResponse.quality}
           model={draftResponse.model}
           revisionCount={draftResponse.revisionCount}
+          planningTarget={planningTarget}
           confirming={phase === "confirming"}
           onChange={setEditableDraft}
           onConfirm={handleConfirm}
@@ -785,30 +839,40 @@ export default function App({ client = apiClient }) {
       ) : null}
 
       {phase === "confirming" ? (
-        <p className="floating-status" role="status">Creating your project and tickets…</p>
+        <p className="floating-status" role="status">
+          {planningTarget
+            ? "Refining the ticket and adding child tickets…"
+            : "Creating your project and tickets…"}
+        </p>
       ) : null}
 
       {confirmation ? (
         <section className="confirmation-card" aria-labelledby="confirmation-title">
           <div className="confirmation-seal" aria-hidden="true">✓</div>
           <p className="section-index">03 / Created</p>
-          <h2 id="confirmation-title">Project created</h2>
+          <h2 id="confirmation-title">
+            {planningTarget ? "Ticket plan added" : "Project created"}
+          </h2>
           <p className="confirmation-project">
             Project #{confirmation.projectId} · {confirmation.projectName}
           </p>
           <p className="muted-copy">
-            {confirmation.taskIds.length} tickets are now ready in your task board.
+            {confirmation.taskIds.length} {planningTarget ? "child tickets are" : "tickets are"}
+            {" "}now ready in your task board.
           </p>
           <div className="confirmation-actions">
             <button
               className="primary-action"
               type="button"
-              onClick={() => handleOpenProjects(confirmation.projectId)}
+              onClick={() => planningTarget
+                ? handleOpenBoard(confirmation.projectId)
+                : handleOpenProjects(confirmation.projectId)}
             >
-              <span>View project</span><span aria-hidden="true">↗</span>
+              <span>{planningTarget ? "Open project board" : "View project"}</span>
+              <span aria-hidden="true">↗</span>
             </button>
             <button className="text-action" type="button" onClick={handleStartOver}>
-              Plan another project
+              {planningTarget ? "Start a new project plan" : "Plan another project"}
             </button>
           </div>
         </section>

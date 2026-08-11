@@ -46,6 +46,27 @@ describe("project API client", () => {
     );
   });
 
+  it("generates a plan for one ticket inside its existing project", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ runId: "run-2" }, 201));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.generateTaskPlan({
+      token: "jwt-token",
+      projectId: "project/20",
+      taskId: "task/201",
+      prompt: "Break this ticket into an actionable plan",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://api.test/api/project-generation-runs/projects/project%2F20/tasks/task%2F201",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
+        body: JSON.stringify({ prompt: "Break this ticket into an actionable plan" }),
+      }),
+    );
+  });
+
   it("confirms the edited draft for the generated run", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ projectId: 42 }, 201));
     const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });

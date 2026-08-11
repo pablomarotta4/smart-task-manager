@@ -464,6 +464,37 @@ h3 {
   max-width: 420px;
 }
 
+.planning-context-banner {
+  display: grid;
+  gap: 0.45rem;
+  max-width: 430px;
+  margin-top: 2rem;
+  border: 1px solid var(--ink);
+  border-left: 4px solid var(--accent);
+  background: var(--paper-bright);
+  padding: 1rem 1.1rem;
+}
+
+.planning-context-banner span {
+  color: var(--accent-dark);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.planning-context-banner strong {
+  font-family: var(--display);
+  font-size: 1.2rem;
+}
+
+.planning-context-banner p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
 .prompt-principle {
   display: flex;
   max-width: 390px;

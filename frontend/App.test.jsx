@@ -231,6 +231,7 @@ const assignedWorkItems = [
 const createClient = () => ({
   login: vi.fn().mockResolvedValue(authenticatedUser),
   generateProject: vi.fn().mockResolvedValue(generatedDraft),
+  generateTaskPlan: vi.fn().mockResolvedValue(generatedDraft),
   confirmProject: vi.fn(),
   getProjects: vi.fn().mockResolvedValue(savedProjects),
   createProject: vi.fn().mockImplementation(({ project }) => Promise.resolve({
@@ -653,6 +654,67 @@ describe("AI project workshop", () => {
       .toBeInTheDocument();
   });
 
+  it("plans one existing ticket with project context and returns to the same board", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmProject.mockResolvedValue({
+      runId: "run-1",
+      projectId: 20,
+      projectName: "Job Application Tracker - Initial Backlog",
+      taskIds: [301, 302, 303],
+      alreadyConfirmed: false,
+    });
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(
+      screen.getByRole("button", { name: /open create opportunity intake/i }),
+    );
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    await user.click(within(panel).getByRole("button", { name: /plan with ai/i }));
+
+    expect(screen.getByRole("button", { name: /^workshop$/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("heading", { name: /plan this ticket/i })).toBeInTheDocument();
+    expect(screen.getByText("Job Application Tracker - Initial Backlog")).toBeInTheDocument();
+    expect(screen.getByText("Create opportunity intake")).toBeInTheDocument();
+    expect(screen.getByText(/nothing changes until confirmation/i)).toBeInTheDocument();
+
+    const instructions = screen.getByLabelText(/planning instructions/i);
+    expect(instructions.value).toContain("actionable implementation plan");
+    await user.click(screen.getByRole("button", { name: /generate task plan/i }));
+
+    expect(client.generateTaskPlan).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      taskId: 201,
+      prompt: instructions.value,
+    });
+    expect(await screen.findByLabelText(/refined ticket title/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /confirm and add tickets/i }));
+
+    expect(client.confirmProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-1",
+      draft: generatedDraft.draft,
+    });
+    expect(await screen.findByRole("heading", { name: /ticket plan added/i }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/3 child tickets/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /open project board/i }));
+
+    expect(client.getProjectTasks).toHaveBeenLastCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    expect(await screen.findByRole("heading", { name: /project board/i }))
+      .toBeInTheDocument();
+  });
+
   it("creates a manual ticket and deletes it only after confirmation", async () => {
     const user = userEvent.setup();
     const client = createClient();
@@ -723,6 +785,8 @@ describe("AI project workshop", () => {
     expect(within(personalTicket).queryByLabelText(/^assignee$/i)).not.toBeInTheDocument();
     expect(within(personalTicket).queryByLabelText(/^priority$/i)).not.toBeInTheDocument();
     expect(within(personalTicket).queryByRole("button", { name: /delete ticket/i }))
+      .not.toBeInTheDocument();
+    expect(within(personalTicket).queryByRole("button", { name: /plan with ai/i }))
       .not.toBeInTheDocument();
     await user.click(within(personalTicket).getByRole("button", { name: /close ticket/i }));
     expect(screen.getByRole("heading", { name: /blocked/i })).toBeInTheDocument();

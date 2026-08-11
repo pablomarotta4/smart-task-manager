@@ -43,6 +43,7 @@ export default function BoardSection({
   onDeleteTask,
   onAddProjectMember,
   onRemoveProjectMember,
+  onPlanTask,
   onPlanFollowUp,
   onUpdateProject,
   onDeleteProject,
@@ -211,6 +212,7 @@ export default function BoardSection({
           onClose={onCloseTask}
           onSave={onSaveTask}
           onDelete={onDeleteTask}
+          onPlanWithAI={onPlanTask}
         />
       ) : null}
     </section>

@@ -59,6 +59,12 @@ export const createApiClient = ({
     login: (credentials) => request("/api/auth/login", { body: credentials }),
     generateProject: ({ token, prompt }) =>
       request("/api/project-generation-runs", { token, body: { prompt } }),
+    generateTaskPlan: ({ token, projectId, taskId, prompt }) =>
+      request(
+        `/api/project-generation-runs/projects/${encodeURIComponent(projectId)}`
+          + `/tasks/${encodeURIComponent(taskId)}`,
+        { token, body: { prompt } },
+      ),
     confirmProject: ({ token, runId, draft }) =>
       request(`/api/project-generation-runs/${runId}/confirm`, {
         token,

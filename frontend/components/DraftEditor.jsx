@@ -6,10 +6,12 @@ export default function DraftEditor({
   quality,
   model,
   revisionCount,
+  planningTarget,
   confirming,
   onChange,
   onConfirm,
 }) {
+  const isExistingTaskPlan = planningTarget != null;
   const updateProjectField = (field, value) => {
     onChange({ ...draft, [field]: value });
   };
@@ -35,7 +37,9 @@ export default function DraftEditor({
           <p className="section-index">02 / Review</p>
           <h2 id="draft-title">{draft.name}</h2>
           <p className="muted-copy">
-            Edit the project and ticket language before anything is written to the task board.
+            {isExistingTaskPlan
+              ? "Edit the selected ticket and proposed child tickets before anything changes on the board."
+              : "Edit the project and ticket language before anything is written to the task board."}
           </p>
         </div>
         <QualityPanel quality={quality} model={model} revisionCount={revisionCount} />
@@ -43,10 +47,16 @@ export default function DraftEditor({
 
       <form className="draft-form" onSubmit={onConfirm}>
         <section className="project-details-card" aria-labelledby="project-details-title">
-          <p className="section-index">Project definition</p>
-          <h3 id="project-details-title">Project details</h3>
+          <p className="section-index">
+            {isExistingTaskPlan ? "Selected ticket" : "Project definition"}
+          </p>
+          <h3 id="project-details-title">
+            {isExistingTaskPlan ? "Ticket refinement" : "Project details"}
+          </h3>
           <div className="field-group">
-            <label htmlFor="draft-name">Project name</label>
+            <label htmlFor="draft-name">
+              {isExistingTaskPlan ? "Refined ticket title" : "Project name"}
+            </label>
             <input
               id="draft-name"
               value={draft.name}
@@ -58,7 +68,9 @@ export default function DraftEditor({
           </div>
 
           <div className="field-group">
-            <label htmlFor="draft-objective">Objective</label>
+            <label htmlFor="draft-objective">
+              {isExistingTaskPlan ? "Refined ticket objective" : "Objective"}
+            </label>
             <textarea
               id="draft-objective"
               value={draft.objective}
@@ -113,8 +125,12 @@ export default function DraftEditor({
 
         <section className="tickets-section" aria-labelledby="tickets-title">
           <div className="tickets-heading">
-            <p className="section-index">First backlog</p>
-            <h3 id="tickets-title">{draft.tickets.length} proposed tickets</h3>
+            <p className="section-index">
+              {isExistingTaskPlan ? "Child-ticket plan" : "First backlog"}
+            </p>
+            <h3 id="tickets-title">
+              {draft.tickets.length} proposed {isExistingTaskPlan ? "child tickets" : "tickets"}
+            </h3>
             <p>Ordered by dependency. Edit freely; identifiers and links stay stable.</p>
           </div>
           <div className="ticket-sequence">
@@ -132,7 +148,11 @@ export default function DraftEditor({
         <footer className="confirmation-bar">
           <div>
             <strong>Human confirmation required</strong>
-            <p>This creates one project and {draft.tickets.length} TODO tickets.</p>
+            <p>
+              {isExistingTaskPlan
+                ? `This refines ticket #${planningTarget.task.id} and adds ${draft.tickets.length} child tickets to ${planningTarget.project.name}.`
+                : `This creates one project and ${draft.tickets.length} TODO tickets.`}
+            </p>
           </div>
           <button
             className="primary-action"
@@ -140,7 +160,11 @@ export default function DraftEditor({
             disabled={confirming}
             aria-busy={confirming}
           >
-            <span>{confirming ? "Creating project…" : "Confirm and create project"}</span>
+            <span>
+              {confirming
+                ? (isExistingTaskPlan ? "Adding tickets…" : "Creating project…")
+                : (isExistingTaskPlan ? "Confirm and add tickets" : "Confirm and create project")}
+            </span>
             <span aria-hidden="true">{confirming ? "◌" : "↗"}</span>
           </button>
         </footer>

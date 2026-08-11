@@ -15,6 +15,7 @@ export default function TicketDetailPanel({
   onClose,
   onSave,
   onDelete,
+  onPlanWithAI,
 }) {
   const closeButtonRef = useRef(null);
   const [draft, setDraft] = useState({
@@ -231,6 +232,16 @@ export default function TicketDetailPanel({
               </button>
             ) : <span />}
             <div>
+              {onPlanWithAI ? (
+                <button
+                  className="text-action"
+                  type="button"
+                  disabled={saving || deleting}
+                  onClick={() => onPlanWithAI(task)}
+                >
+                  Plan with AI
+                </button>
+              ) : null}
               <button className="text-action" type="button" onClick={onClose}>Cancel</button>
               <button
                 className="primary-action"
