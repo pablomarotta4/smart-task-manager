@@ -70,6 +70,18 @@ export const createApiClient = ({
         token,
         body: { draft },
       }),
+    getGenerationRuns: ({ token }) =>
+      request("/api/project-generation-runs", { method: "GET", token }),
+    getGenerationRun: ({ token, runId }) =>
+      request(`/api/project-generation-runs/${encodeURIComponent(runId)}`, {
+        method: "GET",
+        token,
+      }),
+    retryGenerationRun: ({ token, runId }) =>
+      request(`/api/project-generation-runs/${encodeURIComponent(runId)}/retry`, {
+        method: "POST",
+        token,
+      }),
     getProjects: ({ token }) => request("/api/projects", { method: "GET", token }),
     createProject: ({ token, project }) =>
       request("/api/projects", { method: "POST", token, body: project }),

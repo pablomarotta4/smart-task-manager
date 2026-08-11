@@ -228,11 +228,46 @@ const assignedWorkItems = [
   },
 ];
 
+const readyPlanningRun = {
+  runId: "run-ready",
+  mode: "NEW_PROJECT",
+  status: "DRAFT_READY",
+  prompt: "Build a home renovation plan for redesigning and delivering a new kitchen",
+  attemptCount: 1,
+  projectId: null,
+  projectName: null,
+  targetTaskId: null,
+  targetTaskTitle: null,
+  errorCode: null,
+  retryable: false,
+  createdAt: "2026-08-11T10:00:00",
+  updatedAt: "2026-08-11T10:01:00",
+};
+
+const failedExistingPlanningRun = {
+  runId: "run-failed",
+  mode: "EXISTING_TASK",
+  status: "FAILED",
+  prompt: "Break this ticket into an actionable implementation plan",
+  attemptCount: 1,
+  projectId: 20,
+  projectName: "Job Application Tracker - Initial Backlog",
+  targetTaskId: 201,
+  targetTaskTitle: "Create opportunity intake",
+  errorCode: "AI_PLANNING_UNAVAILABLE",
+  retryable: true,
+  createdAt: "2026-08-11T10:00:00",
+  updatedAt: "2026-08-11T10:01:00",
+};
+
 const createClient = () => ({
   login: vi.fn().mockResolvedValue(authenticatedUser),
   generateProject: vi.fn().mockResolvedValue(generatedDraft),
   generateTaskPlan: vi.fn().mockResolvedValue(generatedDraft),
   confirmProject: vi.fn(),
+  getGenerationRuns: vi.fn().mockResolvedValue([]),
+  getGenerationRun: vi.fn(),
+  retryGenerationRun: vi.fn(),
   getProjects: vi.fn().mockResolvedValue(savedProjects),
   createProject: vi.fn().mockImplementation(({ project }) => Promise.resolve({
     id: 21,
@@ -352,6 +387,79 @@ describe("AI project workshop", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("AI planning service is unavailable");
     expect(promptField).toHaveValue(prompt);
+  });
+
+  it("restores a persisted draft after an authenticated page refresh", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns.mockResolvedValue([readyPlanningRun]);
+    client.getGenerationRun.mockResolvedValue({
+      ...readyPlanningRun,
+      ...generatedDraft,
+      runId: readyPlanningRun.runId,
+    });
+
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("heading", { name: /recent ai plans/i }))
+      .toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /resume draft/i }));
+
+    expect(client.getGenerationRun).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-ready",
+    });
+    expect(await screen.findByRole("heading", { name: "Kitchen Redesign Project" }))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText(/describe your project/i)).toHaveValue(
+      readyPlanningRun.prompt,
+    );
+  });
+
+  it("retries a failed existing-ticket run with its saved planning context", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns.mockResolvedValue([failedExistingPlanningRun]);
+    client.retryGenerationRun.mockResolvedValue({
+      ...generatedDraft,
+      runId: failedExistingPlanningRun.runId,
+    });
+
+    render(<App client={client} />);
+
+    await user.click(await screen.findByRole("button", { name: /retry plan/i }));
+
+    expect(client.retryGenerationRun).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-failed",
+    });
+    expect(await screen.findByLabelText(/refined ticket title/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/planning target/i)).toHaveTextContent(
+      "Job Application Tracker - Initial Backlog",
+    );
+    expect(screen.getByLabelText(/planning target/i)).toHaveTextContent(
+      "Create opportunity intake",
+    );
+  });
+
+  it("keeps the Workshop usable when recent planning history cannot load", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns.mockRejectedValueOnce(
+      new ApiError("Could not load recent plans", { status: 500 }),
+    );
+
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load recent plans");
+    expect(screen.getByRole("heading", { name: /what are we building/i }))
+      .toBeInTheDocument();
+    client.getGenerationRuns.mockResolvedValue([]);
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    expect(await screen.findByText(/no saved ai plans yet/i)).toBeInTheDocument();
   });
 
   it("shows quality evidence and lets the user edit ticket content", async () => {

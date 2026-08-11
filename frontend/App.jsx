@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, apiClient } from "./api";
 import AccountSection from "./components/AccountSection";
@@ -6,6 +6,7 @@ import BoardSection from "./components/BoardSection";
 import DraftEditor from "./components/DraftEditor";
 import MyWorkSection from "./components/MyWorkSection";
 import ProjectsSection from "./components/ProjectsSection";
+import RecentPlanningRuns from "./components/RecentPlanningRuns";
 
 const SESSION_KEY = "smart-task-session";
 
@@ -47,6 +48,37 @@ export default function App({ client = apiClient }) {
   const [workItems, setWorkItems] = useState([]);
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
+  const [recentRuns, setRecentRuns] = useState([]);
+  const [recentRunsPhase, setRecentRunsPhase] = useState("idle");
+  const [recentRunsError, setRecentRunsError] = useState("");
+  const [busyRunId, setBusyRunId] = useState(null);
+
+  const sessionToken = session?.token;
+  const loadRecentRuns = useCallback(async () => {
+    if (!sessionToken) {
+      setRecentRuns([]);
+      return;
+    }
+    setRecentRunsError("");
+    setRecentRunsPhase("loading");
+    try {
+      const runs = await client.getGenerationRuns({ token: sessionToken });
+      setRecentRuns(runs);
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setRecentRunsError(errorMessage(requestError));
+      }
+    } finally {
+      setRecentRunsPhase("idle");
+    }
+  }, [client, sessionToken]);
+
+  useEffect(() => {
+    void loadRecentRuns();
+  }, [loadRecentRuns]);
 
   const handleCredentialChange = (event) => {
     const { name, value } = event.target;
@@ -89,6 +121,7 @@ export default function App({ client = apiClient }) {
       setEditableDraft(structuredClone(response.draft));
       setConfirmation(null);
       setPhase("reviewing");
+      void loadRecentRuns();
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) {
         sessionStorage.removeItem(SESSION_KEY);
@@ -111,6 +144,7 @@ export default function App({ client = apiClient }) {
       });
       setConfirmation(response);
       setPhase("confirmed");
+      void loadRecentRuns();
     } catch (requestError) {
       if (requestError instanceof ApiError && requestError.status === 401) {
         sessionStorage.removeItem(SESSION_KEY);
@@ -518,6 +552,72 @@ export default function App({ client = apiClient }) {
     setActiveView("workshop");
   };
 
+  const planningTargetFromRun = (run) => run.mode === "EXISTING_TASK" ? {
+    project: { id: run.projectId, name: run.projectName },
+    task: { id: run.targetTaskId, title: run.targetTaskTitle },
+  } : null;
+
+  const restoreDraft = (response, run) => {
+    setPlanningTarget(planningTargetFromRun(run));
+    setPrompt(run.prompt);
+    setDraftResponse(response);
+    setEditableDraft(structuredClone(response.draft));
+    setConfirmation(null);
+    setError("");
+    setPhase("reviewing");
+    setActiveView("workshop");
+  };
+
+  const handleResumeRun = async (run) => {
+    setBusyRunId(run.runId);
+    setRecentRunsError("");
+    try {
+      const response = await client.getGenerationRun({
+        token: session.token,
+        runId: run.runId,
+      });
+      restoreDraft(response, response);
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setRecentRunsError(errorMessage(requestError));
+      }
+    } finally {
+      setBusyRunId(null);
+    }
+  };
+
+  const handleRetryRun = async (run) => {
+    setBusyRunId(run.runId);
+    setRecentRunsError("");
+    setError("");
+    setPhase("generating");
+    setPlanningTarget(planningTargetFromRun(run));
+    setPrompt(run.prompt);
+    setActiveView("workshop");
+    try {
+      const response = await client.retryGenerationRun({
+        token: session.token,
+        runId: run.runId,
+      });
+      restoreDraft(response, run);
+      void loadRecentRuns();
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setError(errorMessage(requestError));
+        setPhase("idle");
+        void loadRecentRuns();
+      }
+    } finally {
+      setBusyRunId(null);
+    }
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem(SESSION_KEY);
     setSession(null);
@@ -536,6 +636,10 @@ export default function App({ client = apiClient }) {
     setMemberMutationPhase("idle");
     setTaskMutationPhase("idle");
     setWorkItems([]);
+    setRecentRuns([]);
+    setRecentRunsError("");
+    setRecentRunsPhase("idle");
+    setBusyRunId(null);
     setProjectError("");
     setProjectPhase("idle");
     setProjectMutationError("");
@@ -835,6 +939,21 @@ export default function App({ client = apiClient }) {
           confirming={phase === "confirming"}
           onChange={setEditableDraft}
           onConfirm={handleConfirm}
+        />
+      ) : null}
+
+      {!draftResponse && !confirmation ? (
+        <RecentPlanningRuns
+          runs={recentRuns}
+          phase={recentRunsPhase}
+          error={recentRunsError}
+          busyRunId={busyRunId}
+          onResume={handleResumeRun}
+          onRetry={handleRetryRun}
+          onOpen={(run) => run.mode === "EXISTING_TASK"
+            ? handleOpenBoard(run.projectId)
+            : handleOpenProjects(run.projectId)}
+          onRefresh={loadRecentRuns}
         />
       ) : null}
 

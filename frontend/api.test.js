@@ -83,6 +83,34 @@ describe("project API client", () => {
     );
   });
 
+  it("lists, restores, and retries authenticated generation runs", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ runId: "run-1" }]))
+      .mockResolvedValueOnce(jsonResponse({ runId: "run/1", draft: { name: "Plan" } }))
+      .mockResolvedValueOnce(jsonResponse({ runId: "run/1", status: "DRAFT_READY" }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.getGenerationRuns({ token: "jwt-token" });
+    await client.getGenerationRun({ token: "jwt-token", runId: "run/1" });
+    await client.retryGenerationRun({ token: "jwt-token", runId: "run/1" });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/project-generation-runs",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/project-generation-runs/run%2F1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "http://api.test/api/project-generation-runs/run%2F1/retry",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("normalizes Spring error responses", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse(
