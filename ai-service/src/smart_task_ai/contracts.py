@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from enum import StrEnum
 from typing import Annotated, Literal, Self
 from uuid import UUID
@@ -23,6 +24,11 @@ ClientId = Annotated[
         pattern=r"^[a-z][a-z0-9-]*$",
     ),
 ]
+PositiveId = Annotated[int, Field(gt=0)]
+
+
+def _empty_int_list() -> list[int]:
+    return []
 
 
 class ContractModel(BaseModel):
@@ -101,10 +107,56 @@ class BriefAnalysis(ContractModel):
     explicit_capabilities: Annotated[list[ShortText], Field(min_length=1, max_length=12)]
 
 
+class PlanningProjectContext(ContractModel):
+    id: PositiveId
+    name: Annotated[str, StringConstraints(min_length=3, max_length=150)]
+    objective: Annotated[str | None, StringConstraints(max_length=2_000)] = None
+
+
+class PlanningTaskContext(ContractModel):
+    id: PositiveId
+    title: Annotated[str, StringConstraints(min_length=1, max_length=255)]
+    description: Annotated[str | None, StringConstraints(max_length=2_000)] = None
+    status: Literal["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"]
+    priority: Priority | None = None
+    category: Annotated[str | None, StringConstraints(max_length=32)] = None
+    due_date: date | None = None
+    position: Annotated[int | None, Field(ge=0)] = None
+    assignee_id: PositiveId | None = None
+    assignee_username: Annotated[str | None, StringConstraints(max_length=50)] = None
+    acceptance_criteria: Annotated[list[Criterion], Field(max_length=20)] = Field(
+        default_factory=list
+    )
+    depends_on_task_ids: list[int] = Field(default_factory=_empty_int_list, max_length=20)
+
+
+class PlanningContext(ContractModel):
+    mode: Literal["EXISTING_TASK"]
+    project: PlanningProjectContext
+    selected_task_id: PositiveId
+    tasks: Annotated[list[PlanningTaskContext], Field(min_length=1, max_length=200)]
+
+    @model_validator(mode="after")
+    def validate_selected_task(self) -> Self:
+        task_ids = [task.id for task in self.tasks]
+        if len(task_ids) != len(set(task_ids)):
+            raise ValueError("project context task IDs must be unique")
+        if self.selected_task_id not in task_ids:
+            raise ValueError("selected task must be present in project context")
+        known_ids = set(task_ids)
+        for task in self.tasks:
+            if any(dependency_id <= 0 for dependency_id in task.depends_on_task_ids):
+                raise ValueError("task context dependency IDs must be positive")
+            if not set(task.depends_on_task_ids).issubset(known_ids):
+                raise ValueError("task context contains an unknown dependency")
+        return self
+
+
 class PlanningRequest(ContractModel):
     contract_version: Literal["v1"]
     run_id: UUID
     prompt: Annotated[str, StringConstraints(min_length=10, max_length=4_000)]
+    context: PlanningContext | None = None
 
 
 class QualityIssue(ContractModel):

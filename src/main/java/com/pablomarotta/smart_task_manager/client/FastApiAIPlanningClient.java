@@ -2,6 +2,7 @@ package com.pablomarotta.smart_task_manager.client;
 
 import com.pablomarotta.smart_task_manager.config.AIPlanningProperties;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningRequest;
+import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningContext;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningResponse;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,11 +32,15 @@ public class FastApiAIPlanningClient implements AIPlanningClient {
     }
 
     @Override
-    public AIPlanningResponse generatePlan(UUID runId, String prompt) {
+    public AIPlanningResponse generatePlan(
+            UUID runId,
+            String prompt,
+            AIPlanningContext context
+    ) {
         try {
             AIPlanningResponse response = restClient.post()
                     .uri("/internal/v1/project-plans")
-                    .body(new AIPlanningRequest(runId, prompt))
+                    .body(new AIPlanningRequest(runId, prompt, context))
                     .retrieve()
                     .body(AIPlanningResponse.class);
             if (response == null) {

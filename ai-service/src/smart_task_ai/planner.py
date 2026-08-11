@@ -5,10 +5,17 @@ from uuid import UUID
 
 from langgraph.graph import END, START, StateGraph
 
-from smart_task_ai.contracts import PlanningResponse, ProjectDraft, QualityIssue, QualityReport
+from smart_task_ai.contracts import (
+    PlanningContext,
+    PlanningResponse,
+    ProjectDraft,
+    QualityIssue,
+    QualityReport,
+)
 from smart_task_ai.prompts import (
     BRIEF_ANALYSIS_SYSTEM_PROMPT,
     PLANNER_SYSTEM_PROMPT,
+    TASK_PLANNER_SYSTEM_PROMPT,
     brief_analysis_prompt,
     generation_prompt,
     revision_prompt,
@@ -23,6 +30,7 @@ class PlanningState(TypedDict, total=False):
     quality: QualityReport
     revision_count: int
     explicit_capabilities: list[str]
+    context: PlanningContext | None
 
 
 class ProjectPlanner:
@@ -64,15 +72,21 @@ class ProjectPlanner:
             raise RuntimeError("planning graph cannot analyze a missing brief")
         analysis = await self._brief_analyzer.analyze(
             system_prompt=BRIEF_ANALYSIS_SYSTEM_PROMPT,
-            user_prompt=brief_analysis_prompt(prompt),
+            user_prompt=brief_analysis_prompt(prompt, state.get("context")),
         )
         return PlanningState(explicit_capabilities=analysis.explicit_capabilities)
 
-    async def plan(self, *, run_id: UUID, prompt: str) -> PlanningResponse:
+    async def plan(
+        self,
+        *,
+        run_id: UUID,
+        prompt: str,
+        context: PlanningContext | None = None,
+    ) -> PlanningResponse:
         final_state = cast(
             PlanningState,
             await self._graph.ainvoke(
-                PlanningState(prompt=prompt, revision_count=0)
+                PlanningState(prompt=prompt, revision_count=0, context=context)
             ),
         )
         draft = final_state.get("draft")
@@ -91,9 +105,17 @@ class ProjectPlanner:
         prompt = state.get("prompt")
         if prompt is None:
             raise RuntimeError("planning graph requires a prompt")
+        context = state.get("context")
+        system_prompt = (
+            TASK_PLANNER_SYSTEM_PROMPT if context is not None else PLANNER_SYSTEM_PROMPT
+        )
         draft = await self._model.generate(
-            system_prompt=PLANNER_SYSTEM_PROMPT,
-            user_prompt=generation_prompt(prompt, state.get("explicit_capabilities")),
+            system_prompt=system_prompt,
+            user_prompt=generation_prompt(
+                prompt,
+                state.get("explicit_capabilities"),
+                context,
+            ),
         )
         return PlanningState(draft=draft)
 
@@ -148,6 +170,7 @@ class ProjectPlanner:
                 draft,
                 quality,
                 state.get("explicit_capabilities"),
+                state.get("context"),
             ),
         )
         return PlanningState(draft=draft, revision_count=state.get("revision_count", 0) + 1)

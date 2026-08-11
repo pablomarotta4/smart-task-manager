@@ -2,6 +2,12 @@ package com.pablomarotta.smart_task_manager.client;
 
 import com.pablomarotta.smart_task_manager.config.AIPlanningProperties;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningResponse;
+import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningContext;
+import com.pablomarotta.smart_task_manager.dto.planning.PlanningProjectSnapshot;
+import com.pablomarotta.smart_task_manager.dto.planning.PlanningTaskSnapshot;
+import com.pablomarotta.smart_task_manager.model.Priority;
+import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
+import com.pablomarotta.smart_task_manager.model.Status;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -9,6 +15,7 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
 import java.util.UUID;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -69,6 +76,55 @@ class FastApiAIPlanningClientTest {
                 AIPlanningUnavailableException.class,
                 () -> client.generatePlan(UUID.randomUUID(), "Build a useful household budget application")
         );
+    }
+
+    @Test
+    void generatePlanSerializesExistingTaskContext() {
+        UUID runId = UUID.fromString("4cc8ab44-1d91-4b12-96ac-cba3824a7907");
+        AIPlanningContext context = new AIPlanningContext(
+                ProjectGenerationMode.EXISTING_TASK,
+                new PlanningProjectSnapshot(20L, "Budget App", "Manage a household budget"),
+                201L,
+                List.of(new PlanningTaskSnapshot(
+                        201L,
+                        "Import bank transactions",
+                        "Import normalized transactions from a bank export.",
+                        Status.TODO,
+                        Priority.HIGH,
+                        "IMPORT",
+                        null,
+                        0,
+                        null,
+                        null,
+                        List.of(),
+                        List.of()
+                ))
+        );
+        server.expect(once(), requestTo("http://ai-service:8000/internal/v1/project-plans"))
+                .andExpect(method(org.springframework.http.HttpMethod.POST))
+                .andExpect(content().json("""
+                        {
+                          "contract_version": "v1",
+                          "run_id": "4cc8ab44-1d91-4b12-96ac-cba3824a7907",
+                          "prompt": "Break this ticket into implementation steps",
+                          "context": {
+                            "mode": "EXISTING_TASK",
+                            "project": {"id": 20, "name": "Budget App"},
+                            "selected_task_id": 201,
+                            "tasks": [{"id": 201, "title": "Import bank transactions"}]
+                          }
+                        }
+                        """, false))
+                .andRespond(withSuccess(successResponse(runId), MediaType.APPLICATION_JSON));
+
+        AIPlanningResponse response = client.generatePlan(
+                runId,
+                "Break this ticket into implementation steps",
+                context
+        );
+
+        assertEquals(runId, response.runId());
+        server.verify();
     }
 
     private String successResponse(UUID runId) {

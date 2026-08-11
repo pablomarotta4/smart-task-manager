@@ -5,7 +5,15 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from smart_task_ai.contracts import PlanningRequest, Priority, ProjectDraft, TicketDraft
+from smart_task_ai.contracts import (
+    PlanningContext,
+    PlanningProjectContext,
+    PlanningRequest,
+    PlanningTaskContext,
+    Priority,
+    ProjectDraft,
+    TicketDraft,
+)
 
 
 def ticket(client_id: str, *, depends_on: list[str] | None = None) -> TicketDraft:
@@ -36,6 +44,44 @@ def test_accepts_a_strict_versioned_request_and_project_draft() -> None:
 
     assert request.contract_version == "v1"
     assert len(draft().tickets) == 3
+
+
+def test_accepts_existing_task_context_and_rejects_an_unknown_selected_task() -> None:
+    context = PlanningContext(
+        mode="EXISTING_TASK",
+        project=PlanningProjectContext(
+            id=20,
+            name="Job Application Tracker",
+            objective="Track opportunities through offer decisions.",
+        ),
+        selected_task_id=201,
+        tasks=[
+            PlanningTaskContext(
+                id=201,
+                title="Capture opportunity",
+                description="Record company, role, source, and application link.",
+                status="TODO",
+                priority=Priority.HIGH,
+                position=0,
+                acceptance_criteria=["Every opportunity records its source"],
+                depends_on_task_ids=[],
+            )
+        ],
+    )
+
+    request = PlanningRequest(
+        contract_version="v1",
+        run_id=uuid4(),
+        prompt="Break this ticket into an actionable plan",
+        context=context,
+    )
+
+    assert request.context is not None
+    assert request.context.selected_task_id == 201
+    invalid = context.model_dump(mode="json")
+    invalid["selected_task_id"] = 999
+    with pytest.raises(ValidationError, match="selected task"):
+        PlanningContext.model_validate(invalid)
 
 
 @pytest.mark.parametrize(

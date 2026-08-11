@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, FastAPI, HTTPException, status
 
-from smart_task_ai.contracts import PlanningRequest, PlanningResponse
+from smart_task_ai.contracts import PlanningContext, PlanningRequest, PlanningResponse
 from smart_task_ai.ollama import (
     OllamaPlanningModel,
     ProviderResponseError,
@@ -19,7 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 class PlanningService(Protocol):
-    async def plan(self, *, run_id: UUID, prompt: str) -> PlanningResponse: ...
+    async def plan(
+        self,
+        *,
+        run_id: UUID,
+        prompt: str,
+        context: PlanningContext | None = None,
+    ) -> PlanningResponse: ...
 
 
 def create_app(*, planner: PlanningService | None = None) -> FastAPI:
@@ -49,7 +55,11 @@ def create_app(*, planner: PlanningService | None = None) -> FastAPI:
         request: PlanningRequest,
     ) -> PlanningResponse:
         try:
-            return await planner.plan(run_id=request.run_id, prompt=request.prompt)
+            return await planner.plan(
+                run_id=request.run_id,
+                prompt=request.prompt,
+                context=request.context,
+            )
         except ProviderTimeout as exc:
             logger.warning("AI planning timed out for run_id=%s", request.run_id)
             raise HTTPException(

@@ -7,6 +7,7 @@ import httpx
 
 from smart_task_ai.api import create_app
 from smart_task_ai.contracts import (
+    PlanningContext,
     PlanningResponse,
     Priority,
     ProjectDraft,
@@ -67,9 +68,17 @@ def response_for(run_id: UUID) -> PlanningResponse:
 class FakePlanner:
     failure: Exception | None = None
     received_prompt: str | None = None
+    received_context: PlanningContext | None = None
 
-    async def plan(self, *, run_id: UUID, prompt: str) -> PlanningResponse:
+    async def plan(
+        self,
+        *,
+        run_id: UUID,
+        prompt: str,
+        context: PlanningContext | None = None,
+    ) -> PlanningResponse:
         self.received_prompt = prompt
+        self.received_context = context
         if self.failure:
             raise self.failure
         return response_for(run_id)
@@ -122,6 +131,48 @@ async def test_rejects_invalid_request_before_calling_planner() -> None:
 
     assert response.status_code == 422
     assert planner.received_prompt is None
+
+
+async def test_passes_existing_task_context_to_the_planner() -> None:
+    planner = FakePlanner()
+    app = create_app(planner=planner)
+    payload: dict[str, object] = {
+        "contract_version": "v1",
+        "run_id": str(uuid4()),
+        "prompt": "Break this ticket into implementation steps",
+        "context": {
+            "mode": "EXISTING_TASK",
+            "project": {
+                "id": 20,
+                "name": "Budget App",
+                "objective": "Help a household manage its monthly budget.",
+            },
+            "selected_task_id": 201,
+            "tasks": [
+                {
+                    "id": 201,
+                    "title": "Import bank transactions",
+                    "description": "Import normalized transactions from a bank export.",
+                    "status": "TODO",
+                    "priority": "HIGH",
+                    "position": 0,
+                    "acceptance_criteria": [],
+                    "depends_on_task_ids": [],
+                }
+            ],
+        },
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/internal/v1/project-plans",
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert planner.received_context is not None
+    assert planner.received_context.selected_task_id == 201
 
 
 async def test_maps_provider_timeout_without_exposing_prompt() -> None:
