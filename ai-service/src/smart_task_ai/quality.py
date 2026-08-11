@@ -11,6 +11,7 @@ from smart_task_ai.contracts import (
     QualityIssue,
     QualityMetrics,
     QualityReport,
+    TicketDraft,
 )
 
 PASSING_SCORE = 75
@@ -20,6 +21,7 @@ MIN_USEFUL_CRITERIA = 2
 GENERIC_CAPABILITY_TOKENS = {
     "a",
     "an",
+    "are",
     "the",
     "allow",
     "build",
@@ -34,7 +36,10 @@ GENERIC_CAPABILITY_TOKENS = {
     "facilitate",
     "handle",
     "implement",
+    "is",
     "manage",
+    "more",
+    "no",
     "organize",
     "provide",
     "receive",
@@ -43,8 +48,10 @@ GENERIC_CAPABILITY_TOKENS = {
     "shared",
     "support",
     "system",
+    "than",
     "user",
     "users",
+    "without",
 }
 NON_ENFORCEABLE_GOAL_VERBS = {"build", "develop", "organize"}
 GENERIC_WORK_TITLE_TOKENS = {
@@ -53,11 +60,16 @@ GENERIC_WORK_TITLE_TOKENS = {
     "configure",
     "create",
     "deliver",
+    "display",
     "enable",
     "implement",
+    "review",
     "set",
     "setup",
     "support",
+}
+DISTINCT_ACTION_PAIRS = {
+    frozenset(("create", "delete")),
 }
 
 
@@ -72,14 +84,29 @@ def normalized_tokens(text: str) -> set[str]:
 
 
 def word_forms(word: str) -> set[str]:
-    base = word[:-1] if word.endswith("s") and not word.endswith("ss") else word
-    forms = {word, base, f"{base}s"}
-    if base.endswith("e"):
-        forms.update({f"{base}d", f"{base[:-1]}ing", f"{base[:-1]}ings"})
-    else:
-        forms.update({f"{base}ed", f"{base}ing", f"{base}ings"})
-        if len(base) >= 3 and base[-1] not in "aeiou" and base[-2] in "aeiou":
-            forms.update({f"{base}{base[-1]}ed", f"{base}{base[-1]}ing"})
+    roots = {word}
+    if word.endswith("s") and not word.endswith("ss"):
+        roots.add(word[:-1])
+    if word.endswith("ed") and len(word) > 3:
+        stem = word[:-2]
+        roots.update({stem, f"{stem}e"})
+        if len(stem) > 2 and stem[-1] == stem[-2]:
+            roots.add(stem[:-1])
+    if word.endswith("ing") and len(word) > 4:
+        stem = word[:-3]
+        roots.update({stem, f"{stem}e"})
+        if len(stem) > 2 and stem[-1] == stem[-2]:
+            roots.add(stem[:-1])
+
+    forms = set(roots)
+    for base in roots:
+        forms.add(f"{base}s")
+        if base.endswith("e"):
+            forms.update({f"{base}d", f"{base[:-1]}ing", f"{base[:-1]}ings"})
+        else:
+            forms.update({f"{base}ed", f"{base}ing", f"{base}ings"})
+            if len(base) >= 3 and base[-1] not in "aeiou" and base[-2] in "aeiou":
+                forms.update({f"{base}{base[-1]}ed", f"{base}{base[-1]}ing"})
     return forms
 
 
@@ -87,9 +114,27 @@ def capability_matches_ticket(capability: str, ticket_tokens: set[str]) -> bool:
     ordered_tokens = re.findall(r"[a-z0-9]+", capability.casefold())
     if ordered_tokens and ordered_tokens[0] in NON_ENFORCEABLE_GOAL_VERBS:
         return True
+    expanded_ticket_tokens = set(ticket_tokens)
+    if "daily" in expanded_ticket_tokens:
+        expanded_ticket_tokens.update({"day", "once", "per"})
+    delivery_tokens = {
+        "deliver",
+        "delivered",
+        "delivers",
+        "receive",
+        "received",
+        "receives",
+        "send",
+        "sending",
+        "sends",
+        "sent",
+    }
+    if expanded_ticket_tokens & delivery_tokens:
+        expanded_ticket_tokens.update(delivery_tokens)
+
     capability_tokens = set(ordered_tokens) - GENERIC_CAPABILITY_TOKENS
     return not capability_tokens or all(
-        word_forms(token) & ticket_tokens for token in capability_tokens
+        word_forms(token) & expanded_ticket_tokens for token in capability_tokens
     )
 
 
@@ -100,6 +145,9 @@ def find_missing_capabilities(draft: ProjectDraft, capabilities: list[str]) -> l
         )
         for ticket in draft.tickets
     ]
+    combined_tokens: set[str] = set()
+    for ticket_tokens in ticket_token_sets:
+        combined_tokens.update(ticket_tokens)
     return [
         capability
         for capability in capabilities
@@ -107,6 +155,7 @@ def find_missing_capabilities(draft: ProjectDraft, capabilities: list[str]) -> l
             capability_matches_ticket(capability, ticket_tokens)
             for ticket_tokens in ticket_token_sets
         )
+        and not capability_matches_ticket(capability, combined_tokens)
     ]
 
 
@@ -115,7 +164,7 @@ def _selected_ticket_capabilities(context: PlanningContext) -> list[str]:
     return selected.acceptance_criteria or [selected.title]
 
 
-def _duplicate_existing_work_ids(
+def duplicate_existing_work_ids(
     draft: ProjectDraft,
     context: PlanningContext,
 ) -> list[str]:
@@ -133,11 +182,18 @@ def _duplicate_existing_work_ids(
         intent = normalized_tokens(title) - GENERIC_WORK_TITLE_TOKENS
         duplicates_sibling = any(
             title == sibling_title
-            or SequenceMatcher(None, title, sibling_title).ratio() >= SIMILARITY_THRESHOLD
             or (
-                bool(intent)
-                and bool(sibling_intent)
-                and len(intent & sibling_intent) / len(intent | sibling_intent) >= 0.75
+                not _has_distinct_action_verbs(title, sibling_title)
+                and (
+                    SequenceMatcher(None, title, sibling_title).ratio()
+                    >= SIMILARITY_THRESHOLD
+                    or (
+                        bool(intent)
+                        and bool(sibling_intent)
+                        and len(intent & sibling_intent) / len(intent | sibling_intent)
+                        >= 0.65
+                    )
+                )
             )
             for sibling_title, sibling_intent in zip(
                 sibling_titles, sibling_intents, strict=True
@@ -146,6 +202,59 @@ def _duplicate_existing_work_ids(
         if duplicates_sibling:
             duplicate_ids.append(ticket.client_id)
     return duplicate_ids
+
+
+def omit_duplicate_existing_work(
+    draft: ProjectDraft,
+    context: PlanningContext,
+) -> ProjectDraft:
+    """Drop high-confidence sibling duplicates when at least three child tickets remain."""
+    duplicate_ids = set(duplicate_existing_work_ids(draft, context))
+    if not duplicate_ids or len(draft.tickets) - len(duplicate_ids) < 3:
+        return draft
+
+    kept_tickets: list[TicketDraft] = []
+    for ticket in draft.tickets:
+        if ticket.client_id in duplicate_ids:
+            continue
+        kept_tickets.append(
+            ticket.model_copy(
+                update={
+                    "depends_on": [
+                        dependency
+                        for dependency in ticket.depends_on
+                        if dependency not in duplicate_ids
+                    ]
+                }
+            )
+        )
+    return ProjectDraft(
+        name=draft.name,
+        objective=draft.objective,
+        assumptions=list(draft.assumptions),
+        risks=list(draft.risks),
+        open_questions=list(draft.open_questions),
+        tickets=kept_tickets,
+    )
+
+
+def _has_distinct_action_verbs(left: str, right: str) -> bool:
+    left_words = left.split()
+    right_words = right.split()
+    if not left_words or not right_words:
+        return False
+    left_action = left_words[0]
+    right_action = right_words[0]
+    return (
+        left_action != right_action
+        and (
+            (
+                left_action not in GENERIC_WORK_TITLE_TOKENS
+                and right_action not in GENERIC_WORK_TITLE_TOKENS
+            )
+            or frozenset((left_action, right_action)) in DISTINCT_ACTION_PAIRS
+        )
+    )
 
 
 def evaluate_draft(
@@ -184,7 +293,11 @@ def evaluate_draft(
     ):
         similarity = SequenceMatcher(None, left, right).ratio()
         max_similarity = max(max_similarity, similarity)
-        if left != right and similarity >= SIMILARITY_THRESHOLD:
+        if (
+            left != right
+            and similarity >= SIMILARITY_THRESHOLD
+            and not _has_distinct_action_verbs(left, right)
+        ):
             similar_ids.add(draft.tickets[left_index].client_id)
             similar_ids.add(draft.tickets[right_index].client_id)
 
@@ -253,13 +366,15 @@ def evaluate_draft(
             )
             deductions += 40
 
-        duplicate_existing_ids = _duplicate_existing_work_ids(draft, context)
+        duplicate_existing_ids = duplicate_existing_work_ids(draft, context)
         if duplicate_existing_ids:
             issues.append(
                 QualityIssue(
                     code="duplicates_existing_work",
                     message=(
-                        "Some proposed tickets duplicate non-selected work already in the project."
+                        "Some proposed tickets duplicate non-selected work already in the "
+                        "project. Remove the listed proposed tickets completely; do not rename "
+                        "or replace them."
                     ),
                     ticket_ids=duplicate_existing_ids,
                 )

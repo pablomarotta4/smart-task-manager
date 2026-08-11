@@ -248,7 +248,7 @@ async def test_evaluation_reports_provider_call_token_and_latency_metrics() -> N
     assert summary.total_provider_duration_ms == 750
 
 
-async def test_evaluation_passes_existing_ticket_context_to_the_planner() -> None:
+async def test_evaluation_suppresses_existing_work_from_contextual_drafts() -> None:
     context = PlanningContext(
         mode="EXISTING_TASK",
         project=PlanningProjectContext(id=1, name="Launch Workspace"),
@@ -280,7 +280,8 @@ async def test_evaluation_passes_existing_ticket_context_to_the_planner() -> Non
         ProjectPlanner(model),
     )
 
-    assert summary.results[0].passed is False
-    assert "duplicates_existing_work" in summary.results[0].issue_codes
-    assert model.call_count == 2
+    assert summary.results[0].passed is True
+    assert "duplicates_existing_work" not in summary.results[0].issue_codes
+    assert summary.results[0].ticket_count == 3
+    assert model.call_count == 1
     assert '"omitted_task_count":' in model.user_prompts[0]

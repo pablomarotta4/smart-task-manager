@@ -129,6 +129,74 @@ async def test_retries_one_incomplete_structured_generation() -> None:
     assert call_count == 2
 
 
+async def test_contract_retry_names_invalid_fields_without_echoing_values() -> None:
+    draft = good_draft()
+    invalid = draft.model_copy(deep=True)
+    invalid.tickets[0].client_id = "PRIVATE-UPPERCASE-ID"
+    call_count = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        payload = json.loads(request.content)
+        if call_count == 1:
+            return httpx.Response(
+                200,
+                json={"message": {"content": invalid.model_dump_json()}},
+            )
+        repair_prompt = payload["messages"][0]["content"]
+        assert "tickets.0.client_id (string_pattern_mismatch)" in repair_prompt
+        assert "Convert every client_id to lowercase" in repair_prompt
+        assert "under 50 characters" in repair_prompt
+        assert "no more than five tickets" in repair_prompt
+        assert "at least two non-empty acceptance criteria" in repair_prompt
+        assert "A ticket must never depend on itself" in repair_prompt
+        assert "must be acyclic" in repair_prompt
+        assert "PRIVATE-UPPERCASE-ID" not in repair_prompt
+        return httpx.Response(200, json={"message": {"content": draft.model_dump_json()}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        model = OllamaPlanningModel(base_url="http://ollama", model="test", client=client)
+        result = await model.generate(system_prompt="system", user_prompt="user")
+
+    assert result == draft
+    assert call_count == 2
+
+
+async def test_contract_repair_can_fix_progressive_validation_errors() -> None:
+    draft = good_draft()
+    invalid_id = draft.model_copy(deep=True)
+    invalid_id.tickets[0].client_id = "PRIVATE-UPPERCASE-ID"
+    empty_criteria = draft.model_copy(deep=True)
+    empty_criteria.tickets[0].acceptance_criteria = []
+    call_count = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal call_count
+        call_count += 1
+        repair_prompt = json.loads(request.content)["messages"][0]["content"]
+        if call_count == 1:
+            return httpx.Response(
+                200,
+                json={"message": {"content": invalid_id.model_dump_json()}},
+            )
+        if call_count == 2:
+            assert "tickets.0.client_id (string_pattern_mismatch)" in repair_prompt
+            return httpx.Response(
+                200,
+                json={"message": {"content": empty_criteria.model_dump_json()}},
+            )
+        assert "tickets.0.acceptance_criteria (too_short)" in repair_prompt
+        return httpx.Response(200, json={"message": {"content": draft.model_dump_json()}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        model = OllamaPlanningModel(base_url="http://ollama", model="test", client=client)
+        result = await model.generate(system_prompt="system", user_prompt="user")
+
+    assert result == draft
+    assert call_count == 3
+
+
 async def test_records_safe_per_attempt_metrics_without_prompt_content(caplog) -> None:  # type: ignore[no-untyped-def]
     draft = good_draft()
     run_id = uuid4()

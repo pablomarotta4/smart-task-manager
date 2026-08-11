@@ -115,6 +115,28 @@ def test_highly_similar_titles_are_flagged_even_when_not_identical() -> None:
     assert report.metrics.max_title_similarity >= 0.82
 
 
+def test_similar_titles_with_distinct_action_verbs_are_not_flagged() -> None:
+    plan = adequate_draft()
+    plan.tickets[0].title = "Export Customer Records to CSV"
+    plan.tickets[1].title = "Import Customer Records from CSV"
+
+    report = evaluate_draft(plan)
+
+    assert report.metrics.max_title_similarity >= 0.82
+    assert "similar_titles" not in {issue.code for issue in report.issues}
+
+
+def test_create_and_delete_titles_are_distinct_lifecycle_actions() -> None:
+    plan = adequate_draft()
+    plan.tickets[0].title = "Create Customer Record"
+    plan.tickets[1].title = "Delete Customer Record"
+
+    report = evaluate_draft(plan)
+
+    assert report.metrics.max_title_similarity >= 0.82
+    assert "similar_titles" not in {issue.code for issue in report.issues}
+
+
 def test_thin_descriptions_and_acceptance_criteria_reduce_sufficiency() -> None:
     plan = adequate_draft()
     plan.tickets[0].description = "Create the login behavior and tests."
@@ -146,6 +168,19 @@ def test_capability_coverage_matches_inflected_action_words() -> None:
     assert find_missing_capabilities(plan, ["return tools"]) == ["return tools"]
 
 
+def test_capability_coverage_matches_past_and_progressive_forms() -> None:
+    plan = adequate_draft()
+    plan.tickets[0].title = "Normalize imported transaction rows"
+    plan.tickets[0].description = (
+        "Every imported row is normalized while duplicate transactions are not created."
+    )
+
+    assert find_missing_capabilities(
+        plan,
+        ["Imported rows are normalized without creating duplicate transactions"],
+    ) == []
+
+
 def test_capability_coverage_ignores_broad_goal_verbs_actors_and_context_modifiers() -> None:
     plan = adequate_draft()
     plan.tickets[0].title = "Publish Tool Listings"
@@ -168,6 +203,20 @@ def test_contextual_quality_flags_selected_ticket_drift() -> None:
     assert report.passed is False
 
 
+def test_contextual_quality_allows_capability_decomposed_across_children() -> None:
+    plan = draft(
+        [
+            ticket("schedule", "Schedule reminder one day before due date"),
+            ticket("deliver", "Send scheduled email reminder to assignee"),
+            ticket("overdue", "Send overdue email reminder daily"),
+        ]
+    )
+
+    report = evaluate_draft(plan, context=reminder_context())
+
+    assert "selected_ticket_drift" not in {issue.code for issue in report.issues}
+
+
 def test_contextual_quality_flags_duplicate_existing_project_work() -> None:
     plan = draft(
         [
@@ -188,3 +237,45 @@ def test_contextual_quality_flags_duplicate_existing_project_work() -> None:
     )
     assert duplicate_issue.ticket_ids == ["preferences"]
     assert report.passed is False
+
+
+def test_contextual_quality_flags_same_outcome_with_different_review_verb() -> None:
+    context = reminder_context().model_copy(deep=True)
+    context.tasks[1].title = "Review monthly spending"
+    plan = adequate_draft()
+    plan.tickets[1].client_id = "monthly"
+    plan.tickets[1].title = "Display monthly spending totals"
+
+    report = evaluate_draft(plan, context=context)
+
+    duplicate_issue = next(
+        issue for issue in report.issues if issue.code == "duplicates_existing_work"
+    )
+    assert duplicate_issue.ticket_ids == ["monthly"]
+    assert "Remove the listed proposed tickets" in duplicate_issue.message
+
+
+def test_contextual_quality_flags_triggering_an_existing_review() -> None:
+    context = reminder_context().model_copy(deep=True)
+    context.tasks[1].title = "Review monthly spending"
+    plan = adequate_draft()
+    plan.tickets[1].client_id = "monthly"
+    plan.tickets[1].title = "Trigger Monthly Spending Review"
+
+    report = evaluate_draft(plan, context=context)
+
+    duplicate_issue = next(
+        issue for issue in report.issues if issue.code == "duplicates_existing_work"
+    )
+    assert duplicate_issue.ticket_ids == ["monthly"]
+
+
+def test_contextual_quality_keeps_opposite_import_export_actions_distinct() -> None:
+    context = reminder_context().model_copy(deep=True)
+    context.tasks[1].title = "Import customer records from CSV"
+    plan = adequate_draft()
+    plan.tickets[1].title = "Export customer records to CSV"
+
+    report = evaluate_draft(plan, context=context)
+
+    assert "duplicates_existing_work" not in {issue.code for issue in report.issues}

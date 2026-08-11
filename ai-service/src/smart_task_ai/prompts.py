@@ -51,6 +51,8 @@ Rules:
 - Do not choose a technology stack, vendor, or integration unless the context requires it.
 - Use the selected ticket as the plan objective and avoid duplicating work already represented
   by other tickets.
+- Treat every non-selected ticket and existing-work index entry as work to exclude, not as an
+  idea to add. Never add a child ticket that repeats its title or outcome.
 - Set the draft name to a refined selected-ticket title and the objective to its refined
   description.
 - Produce 3 to 8 child tickets with concrete outcomes and at least two observable acceptance

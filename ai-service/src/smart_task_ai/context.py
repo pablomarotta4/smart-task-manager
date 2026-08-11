@@ -90,6 +90,19 @@ def _task_order(
     )
 
 
+def _is_detail_relevant(
+    task: PlanningTaskContext,
+    *,
+    selected: PlanningTaskContext,
+    focus_terms: set[str],
+) -> bool:
+    directly_related = (
+        task.id in selected.depends_on_task_ids or selected.id in task.depends_on_task_ids
+    )
+    same_category = bool(selected.category and task.category == selected.category)
+    return directly_related or same_category or bool(_task_terms(task) & focus_terms)
+
+
 def _full_task(task: PlanningTaskContext) -> dict[str, object]:
     return task.model_dump(mode="json", exclude_none=True)
 
@@ -134,7 +147,7 @@ def compile_planning_context(
         "selected_task_id": selected.id,
         "selected_task": _full_task(selected),
         "related_tasks": [],
-        "backlog_index": [],
+        "existing_work_do_not_repeat": [],
         "omitted_task_count": len(candidates),
     }
     serialized = _serialize(payload)
@@ -145,7 +158,12 @@ def compile_planning_context(
     included: set[int] = set()
     related_tasks = payload["related_tasks"]
     assert isinstance(related_tasks, list)
-    for task in candidates[:_MAX_DETAILED_TASKS]:
+    detail_candidates = [
+        task
+        for task in candidates
+        if _is_detail_relevant(task, selected=selected, focus_terms=focus_terms)
+    ]
+    for task in detail_candidates[:_MAX_DETAILED_TASKS]:
         related_tasks.append(_full_task(task))
         payload["omitted_task_count"] = len(candidates) - len(included) - 1
         candidate_json = _serialize(payload)
@@ -158,7 +176,7 @@ def compile_planning_context(
         serialized = candidate_json
 
     indexed: list[int] = []
-    backlog_index = payload["backlog_index"]
+    backlog_index = payload["existing_work_do_not_repeat"]
     assert isinstance(backlog_index, list)
     for task in candidates:
         if task.id in included:

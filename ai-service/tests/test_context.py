@@ -79,6 +79,22 @@ def test_compiler_preserves_selected_ticket_and_prioritizes_related_work() -> No
     assert 4 in compiled.detailed_task_ids
 
 
+def test_compiler_keeps_unrelated_siblings_in_compact_index() -> None:
+    context = project_context()
+
+    compiled = context_api().compile_planning_context(
+        context,
+        planning_prompt="Create a safe implementation plan for reminders",
+        max_tokens=1_600,
+    )
+    payload = json.loads(compiled.context_json)
+
+    assert 1 not in compiled.detailed_task_ids
+    assert 1 in compiled.indexed_task_ids
+    assert payload["existing_work_do_not_repeat"][0]["id"] == 1
+    assert "backlog_index" not in payload
+
+
 def test_compiler_keeps_two_hundred_task_project_inside_budget() -> None:
     context = project_context(200, selected_task_id=100)
 

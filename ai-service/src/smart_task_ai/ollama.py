@@ -7,7 +7,7 @@ from typing import TypeVar, cast
 from uuid import UUID
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from smart_task_ai.contracts import BriefAnalysis, ProjectDraft
 from smart_task_ai.providers import (
@@ -107,6 +107,10 @@ class ProviderResponseError(ProviderError):
 class ProviderMalformedResponse(ProviderResponseError):
     """The provider answered successfully but its structured content was invalid."""
 
+    def __init__(self, message: str, *, repair_hint: str | None = None) -> None:
+        super().__init__(message)
+        self.repair_hint = repair_hint
+
 
 class OllamaPlanningModel:
     def __init__(
@@ -185,28 +189,37 @@ class OllamaPlanningModel:
         response_type: type[StructuredResponse],
         metadata: ModelCallMetadata,
     ) -> StructuredResponse:
-        try:
-            return await self._request(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                schema=schema,
-                response_type=response_type,
-                metadata=metadata,
-                attempt=1,
-            )
-        except ProviderMalformedResponse:
-            repair_instruction = (
-                f"{system_prompt}\nYour previous answer was incomplete or outside the contract. "
-                "Return one complete JSON object and no surrounding prose."
-            )
-            return await self._request(
-                system_prompt=repair_instruction,
-                user_prompt=user_prompt,
-                schema=schema,
-                response_type=response_type,
-                metadata=metadata,
-                attempt=2,
-            )
+        request_system_prompt = system_prompt
+        for attempt in range(1, 4):
+            try:
+                return await self._request(
+                    system_prompt=request_system_prompt,
+                    user_prompt=user_prompt,
+                    schema=schema,
+                    response_type=response_type,
+                    metadata=metadata,
+                    attempt=attempt,
+                )
+            except ProviderMalformedResponse as exc:
+                if attempt == 3:
+                    raise
+                repair_details = (
+                    f" Correct these fields: {exc.repair_hint}."
+                    if exc.repair_hint
+                    else ""
+                )
+                request_system_prompt = (
+                    f"{system_prompt}\nYour previous answer was incomplete or outside the "
+                    "contract. Return one complete JSON object and no surrounding prose."
+                    " Convert every client_id to lowercase kebab-case using only letters, "
+                    "digits, and hyphens, keep it under 50 characters, and update every "
+                    "depends_on value to the exact converted client_id. Return no more than "
+                    "five tickets. Give every ticket at least two non-empty acceptance criteria."
+                    " A ticket must never depend on itself; dependencies may reference only "
+                    "other listed client IDs and must be acyclic."
+                    f"{repair_details}"
+                )
+        raise AssertionError("contract retry loop ended unexpectedly")
 
     async def _request(
         self,
@@ -270,6 +283,12 @@ class OllamaPlanningModel:
         except httpx.HTTPError as exc:
             outcome = "provider_error"
             raise ProviderResponseError("AI provider returned an invalid response") from exc
+        except ValidationError as exc:
+            outcome = "malformed"
+            raise ProviderMalformedResponse(
+                "AI provider returned invalid structured content",
+                repair_hint=self._validation_repair_hint(exc),
+            ) from exc
         except (KeyError, TypeError, ValueError) as exc:
             outcome = "malformed"
             raise ProviderMalformedResponse(
@@ -306,6 +325,20 @@ class OllamaPlanningModel:
     @staticmethod
     def _non_negative_int(value: object) -> int:
         return value if isinstance(value, int) and value >= 0 else 0
+
+    @staticmethod
+    def _validation_repair_hint(exc: ValidationError) -> str:
+        findings: list[str] = []
+        for error in exc.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )[:12]:
+            location = ".".join(str(part) for part in error.get("loc", ()))
+            findings.append(
+                f"{location or 'response'} ({error.get('type', 'invalid')})"
+            )
+        return "; ".join(findings)
 
     async def check_readiness(self) -> ProviderReadiness:
         owns_client = self._client is None

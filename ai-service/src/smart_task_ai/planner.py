@@ -21,7 +21,11 @@ from smart_task_ai.prompts import (
     revision_prompt,
 )
 from smart_task_ai.providers import BriefAnalyzer, ModelCallMetadata, PlanningModel
-from smart_task_ai.quality import evaluate_draft, find_missing_capabilities
+from smart_task_ai.quality import (
+    evaluate_draft,
+    find_missing_capabilities,
+    omit_duplicate_existing_work,
+)
 
 
 class PlanningState(TypedDict, total=False):
@@ -133,6 +137,8 @@ class ProjectPlanner:
             ),
             metadata=ModelCallMetadata(run_id=run_id, phase="generation"),
         )
+        if context is not None:
+            draft = omit_duplicate_existing_work(draft, context)
         return PlanningState(draft=draft)
 
     @staticmethod
@@ -199,6 +205,9 @@ class ProjectPlanner:
             ),
             metadata=ModelCallMetadata(run_id=run_id, phase="revision"),
         )
+        context = state.get("context")
+        if context is not None:
+            draft = omit_duplicate_existing_work(draft, context)
         return PlanningState(draft=draft, revision_count=state.get("revision_count", 0) + 1)
 
     @staticmethod
