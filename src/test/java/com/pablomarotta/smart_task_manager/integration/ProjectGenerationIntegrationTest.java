@@ -87,6 +87,7 @@ class ProjectGenerationIntegrationTest {
                 draft.objective(),
                 draft.assumptions(),
                 draft.risks(),
+                draft.openQuestions(),
                 draft.tickets()
         );
         ProjectGenerationConfirmationResponse confirmed = confirmationService.confirm(

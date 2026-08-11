@@ -169,6 +169,7 @@ class ProjectGenerationConfirmationServiceTest {
         );
         ProjectPlanDraft invalid = new ProjectPlanDraft(
                 original.name(), original.objective(), original.assumptions(), original.risks(),
+                original.openQuestions(),
                 List.of(invalidFirst, original.tickets().get(1), original.tickets().get(2))
         );
 

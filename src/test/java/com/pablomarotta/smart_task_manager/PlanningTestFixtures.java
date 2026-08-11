@@ -36,6 +36,7 @@ public final class PlanningTestFixtures {
                 "Help a household understand and manage its monthly budget.",
                 List.of("The first version supports one household"),
                 List.of("Expense data may be incomplete"),
+                List.of("Should the first release support more than one household?"),
                 List.of(
                         ticket("accounts", "Create household accounts", List.of()),
                         ticket("expenses", "Record categorized expenses", List.of("accounts")),

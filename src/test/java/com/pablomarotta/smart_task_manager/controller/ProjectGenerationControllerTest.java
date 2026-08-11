@@ -166,10 +166,34 @@ class ProjectGenerationControllerTest {
         mockMvc.perform(post("/api/project-generation-runs")
                         .principal(new UsernamePasswordAuthenticationToken("alice", "ignored"))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"prompt\":\"tiny\"}"))
+                        .content("{\"prompt\":\"ab\"}"))
                 .andExpect(status().isBadRequest());
 
         verify(generationService, never()).generateDraft(any(), any());
+    }
+
+    @Test
+    void threeCharacterPromptGeneratesAnImmediateDraft() throws Exception {
+        var aiResponse = PlanningTestFixtures.response(runId);
+        when(generationService.generateDraft("alice", "CRM")).thenReturn(
+                new ProjectGenerationDraftResponse(
+                        runId,
+                        ProjectGenerationStatus.DRAFT_READY,
+                        aiResponse.draft(),
+                        aiResponse.quality(),
+                        aiResponse.revisionCount(),
+                        aiResponse.model()
+                )
+        );
+
+        mockMvc.perform(post("/api/project-generation-runs")
+                        .principal(new UsernamePasswordAuthenticationToken("alice", "ignored"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"prompt\":\"CRM\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.draft.name").value("Budget App"));
+
+        verify(generationService).generateDraft("alice", "CRM");
     }
 
     @Test
@@ -249,6 +273,7 @@ class ProjectGenerationControllerTest {
                 draft.objective(),
                 draft.assumptions(),
                 draft.risks(),
+                List.of("Should imported transactions be reviewed before publishing?"),
                 draft.tickets()
         );
 

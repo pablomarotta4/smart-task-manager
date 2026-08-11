@@ -61,6 +61,10 @@ class FastApiAIPlanningClientTest {
 
         assertEquals(runId, response.runId());
         assertEquals("Budget App", response.draft().name());
+        assertEquals(
+                List.of("Should the first release support more than one household?"),
+                response.draft().openQuestions()
+        );
         assertEquals(3, response.draft().tickets().size());
         assertEquals(100, response.quality().score());
         assertEquals("fake-model", response.model());
@@ -137,6 +141,7 @@ class FastApiAIPlanningClientTest {
                     "objective": "Help a household understand and manage its monthly budget.",
                     "assumptions": ["The first version supports one household"],
                     "risks": ["Expense data may be incomplete"],
+                    "open_questions": ["Should the first release support more than one household?"],
                     "tickets": [
                       {
                         "client_id": "accounts",
