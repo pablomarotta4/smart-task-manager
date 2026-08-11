@@ -25,9 +25,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 
 @WebMvcTest(controllers = {TaskController.class, UserController.class})
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class})
@@ -55,6 +57,16 @@ class SecurityTest {
     void protectedEndpoint_WithoutToken_ShouldReturnUnauthorized() throws Exception {
         mockMvc.perform(get("/api/tasks/alltasks"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void localFrontendOriginCanSendCredentialedAuthRequests() throws Exception {
+        mockMvc.perform(options("/api/auth/refresh")
+                        .header("Origin", "http://127.0.0.1:3000")
+                        .header("Access-Control-Request-Method", "POST"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://127.0.0.1:3000"))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
     }
 
     @Test
