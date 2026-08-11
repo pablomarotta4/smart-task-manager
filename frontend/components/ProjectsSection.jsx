@@ -1,3 +1,7 @@
+import { useState } from "react";
+
+import ProjectCreatePanel from "./ProjectCreatePanel";
+
 const formatDate = (value) => {
   if (!value) return "Date unavailable";
   const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -29,9 +33,13 @@ export default function ProjectsSection({
   tasks,
   phase,
   error,
+  mutationPhase,
+  mutationError,
+  onCreateProject,
   onSelectProject,
   onRetry,
 }) {
+  const [showCreatePanel, setShowCreatePanel] = useState(false);
   const loadingProjects = phase === "loading-projects";
   const loadingTasks = phase === "loading-tasks";
 
@@ -44,10 +52,29 @@ export default function ProjectsSection({
       <header className="projects-hero">
         <p className="section-index">02 / Project archive</p>
         <h1 id="projects-title">Your projects</h1>
-        <p className="muted-copy">
-          Open a saved brief to inspect its ordered backlog, quality context, and next moves.
-        </p>
+        <div className="projects-hero-actions">
+          <p className="muted-copy">
+            Open a saved brief to inspect its ordered backlog, quality context, and next moves.
+          </p>
+          <button
+            className="primary-action"
+            type="button"
+            aria-expanded={showCreatePanel}
+            onClick={() => setShowCreatePanel((current) => !current)}
+          >
+            <span>New project</span><span aria-hidden="true">＋</span>
+          </button>
+        </div>
       </header>
+
+      {showCreatePanel ? (
+        <ProjectCreatePanel
+          creating={mutationPhase === "creating"}
+          error={mutationError}
+          onCreate={onCreateProject}
+          onCancel={() => setShowCreatePanel(false)}
+        />
+      ) : null}
 
       {error ? (
         <div className="projects-error" role="alert">
@@ -67,7 +94,7 @@ export default function ProjectsSection({
         <div className="projects-empty">
           <span aria-hidden="true">∅</span>
           <h2>No projects yet</h2>
-          <p>Return to the workshop and confirm a plan to start the archive.</p>
+          <p>Create one manually, or use the Workshop when you want AI to draft the backlog.</p>
         </div>
       ) : null}
 

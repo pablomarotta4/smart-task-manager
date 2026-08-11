@@ -1,10 +1,37 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-export default function ProjectDesk({ project, taskCount, onPlanFollowUp }) {
+export default function ProjectDesk({
+  project,
+  taskCount,
+  mutationPhase,
+  error,
+  onPlanFollowUp,
+  onUpdateProject,
+  onDeleteProject,
+}) {
   const [openPanel, setOpenPanel] = useState(null);
+  const [draft, setDraft] = useState({
+    name: project.name,
+    objective: project.objective ?? "",
+  });
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    setDraft({ name: project.name, objective: project.objective ?? "" });
+    setConfirmingDelete(false);
+  }, [project.id, project.name, project.objective]);
 
   const togglePanel = (panel) => {
     setOpenPanel((current) => current === panel ? null : panel);
+    setConfirmingDelete(false);
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onUpdateProject(project, {
+      name: draft.name.trim(),
+      objective: draft.objective.trim() || null,
+    });
   };
 
   return (
@@ -55,23 +82,86 @@ export default function ProjectDesk({ project, taskCount, onPlanFollowUp }) {
       ) : null}
 
       {openPanel === "settings" ? (
-        <div className="project-desk-panel project-facts" aria-label="Read-only project settings">
-          <div>
-            <span>Name</span>
-            <strong>{project.name}</strong>
-          </div>
-          <div>
-            <span>Owner</span>
-            <strong>{project.ownerUsername || "Current account"}</strong>
-          </div>
-          <div>
-            <span>Tickets</span>
-            <strong>{taskCount}</strong>
-          </div>
-          <p>
-            Project details are read-only here because the current API does not support
-            updating or deleting projects yet.
-          </p>
+        <div className="project-desk-panel project-settings" aria-label="Project settings form">
+          <form className="project-settings-form" onSubmit={handleSubmit}>
+            <div className="field-group">
+              <label htmlFor={`project-name-${project.id}`}>Project name</label>
+              <input
+                id={`project-name-${project.id}`}
+                value={draft.name}
+                onChange={(event) => setDraft((current) => ({
+                  ...current,
+                  name: event.target.value,
+                }))}
+                maxLength={255}
+                required
+              />
+            </div>
+            <div className="field-group">
+              <label htmlFor={`project-objective-${project.id}`}>Objective</label>
+              <textarea
+                id={`project-objective-${project.id}`}
+                value={draft.objective}
+                onChange={(event) => setDraft((current) => ({
+                  ...current,
+                  objective: event.target.value,
+                }))}
+                rows={3}
+                maxLength={2000}
+              />
+            </div>
+            <div className="project-settings-summary">
+              <span>Owner</span>
+              <strong>{project.ownerUsername || "Current account"}</strong>
+              <span>Tickets</span>
+              <strong>{taskCount}</strong>
+            </div>
+            {error ? <p className="project-mutation-error" role="alert">{error}</p> : null}
+            <div className="project-settings-actions">
+              <button
+                className="primary-action compact-action"
+                type="submit"
+                disabled={mutationPhase !== "idle" || draft.name.trim().length === 0}
+              >
+                {mutationPhase === "updating" ? "Saving project…" : "Save project"}
+              </button>
+              <button
+                className="danger-action"
+                type="button"
+                disabled={mutationPhase !== "idle"}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                Delete project
+              </button>
+            </div>
+          </form>
+
+          {confirmingDelete ? (
+            <div className="danger-confirmation" role="alertdialog" aria-labelledby="delete-project-title">
+              <div>
+                <h3 id="delete-project-title">Delete {project.name}?</h3>
+                <p>This deletes every ticket in this project. This action cannot be undone.</p>
+              </div>
+              <div>
+                <button
+                  className="text-action"
+                  type="button"
+                  disabled={mutationPhase === "deleting"}
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="danger-action is-confirm"
+                  type="button"
+                  disabled={mutationPhase === "deleting"}
+                  onClick={() => onDeleteProject(project)}
+                >
+                  {mutationPhase === "deleting" ? "Deleting project…" : "Yes, delete project"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </aside>

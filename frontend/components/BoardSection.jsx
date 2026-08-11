@@ -26,11 +26,15 @@ export default function BoardSection({
   selectedTask,
   savingTask,
   taskError,
+  projectMutationPhase,
+  projectMutationError,
   onSelectProject,
   onSelectTask,
   onCloseTask,
   onSaveTask,
   onPlanFollowUp,
+  onUpdateProject,
+  onDeleteProject,
   onRetry,
 }) {
   const loading = phase === "loading-projects" || phase === "loading-tasks";
@@ -102,7 +106,11 @@ export default function BoardSection({
           <ProjectDesk
             project={selectedProject}
             taskCount={activeTasks.length}
+            mutationPhase={projectMutationPhase}
+            error={projectMutationError}
             onPlanFollowUp={onPlanFollowUp}
+            onUpdateProject={onUpdateProject}
+            onDeleteProject={onDeleteProject}
           />
 
           <div className="board-lanes" aria-label={`${selectedProject.name} ticket board`}>

@@ -35,6 +35,8 @@ export default function App({ client = apiClient }) {
   const [projectTasks, setProjectTasks] = useState([]);
   const [projectPhase, setProjectPhase] = useState("idle");
   const [projectError, setProjectError] = useState("");
+  const [projectMutationPhase, setProjectMutationPhase] = useState("idle");
+  const [projectMutationError, setProjectMutationError] = useState("");
   const [selectedTask, setSelectedTask] = useState(null);
   const [savingTask, setSavingTask] = useState(false);
   const [taskError, setTaskError] = useState("");
@@ -180,6 +182,83 @@ export default function App({ client = apiClient }) {
     handleOpenProjects();
   };
 
+  const handleCreateProject = async (project) => {
+    setProjectMutationError("");
+    setProjectMutationPhase("creating");
+    try {
+      const created = await client.createProject({ token: session.token, project });
+      setProjects((current) => [created, ...current.filter(
+        (candidate) => candidate.id !== created.id,
+      )]);
+      setSelectedProject(created);
+      setProjectTasks([]);
+      setSelectedTask(null);
+      return true;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setProjectMutationError(errorMessage(requestError));
+      }
+      return false;
+    } finally {
+      setProjectMutationPhase("idle");
+    }
+  };
+
+  const handleUpdateProject = async (project, projectDraft) => {
+    setProjectMutationError("");
+    setProjectMutationPhase("updating");
+    try {
+      const updated = await client.updateProject({
+        token: session.token,
+        projectId: project.id,
+        project: projectDraft,
+      });
+      const mergedProject = { ...project, ...updated };
+      setProjects((current) => current.map(
+        (candidate) => candidate.id === project.id ? mergedProject : candidate,
+      ));
+      setSelectedProject((current) => current?.id === project.id ? mergedProject : current);
+      return true;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setProjectMutationError(errorMessage(requestError));
+      }
+      return false;
+    } finally {
+      setProjectMutationPhase("idle");
+    }
+  };
+
+  const handleDeleteProject = async (project) => {
+    setProjectMutationError("");
+    setProjectMutationPhase("deleting");
+    try {
+      await client.deleteProject({ token: session.token, projectId: project.id });
+      setProjects((current) => current.filter((candidate) => candidate.id !== project.id));
+      setSelectedProject(null);
+      setProjectTasks([]);
+      setSelectedTask(null);
+      setActiveView("projects");
+      return true;
+    } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) {
+        sessionStorage.removeItem(SESSION_KEY);
+        setSession(null);
+      } else {
+        setProjectMutationError(errorMessage(requestError));
+      }
+      return false;
+    } finally {
+      setProjectMutationPhase("idle");
+    }
+  };
+
   const handleOpenBoard = async (projectId = selectedProject?.id ?? null) => {
     setActiveView("board");
     setProjectError("");
@@ -308,6 +387,8 @@ export default function App({ client = apiClient }) {
     setWorkItems([]);
     setProjectError("");
     setProjectPhase("idle");
+    setProjectMutationError("");
+    setProjectMutationPhase("idle");
     setError("");
     setPhase("idle");
   };
@@ -455,6 +536,9 @@ export default function App({ client = apiClient }) {
           tasks={projectTasks}
           phase={projectPhase}
           error={projectError}
+          mutationPhase={projectMutationPhase}
+          mutationError={projectMutationError}
+          onCreateProject={handleCreateProject}
           onSelectProject={handleSelectProject}
           onRetry={handleRetryProjects}
         />
@@ -468,6 +552,8 @@ export default function App({ client = apiClient }) {
           selectedTask={selectedTask}
           savingTask={savingTask}
           taskError={taskError}
+          projectMutationPhase={projectMutationPhase}
+          projectMutationError={projectMutationError}
           onSelectProject={handleSelectProject}
           onSelectTask={(task) => {
             setTaskError("");
@@ -476,6 +562,8 @@ export default function App({ client = apiClient }) {
           onCloseTask={() => setSelectedTask(null)}
           onSaveTask={handleSaveTask}
           onPlanFollowUp={handlePlanFollowUp}
+          onUpdateProject={handleUpdateProject}
+          onDeleteProject={handleDeleteProject}
           onRetry={() => handleOpenBoard(selectedProject?.id ?? null)}
         />
       ) : activeView === "my-work" ? (

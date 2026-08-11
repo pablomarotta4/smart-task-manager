@@ -186,11 +186,25 @@ const createClient = () => ({
   generateProject: vi.fn().mockResolvedValue(generatedDraft),
   confirmProject: vi.fn(),
   getProjects: vi.fn().mockResolvedValue(savedProjects),
+  createProject: vi.fn().mockImplementation(({ project }) => Promise.resolve({
+    id: 21,
+    ...project,
+    ownerId: 7,
+    ownerUsername: "pablo-local",
+    taskCount: 0,
+    createdAt: "2026-08-11T12:00:00",
+  })),
+  updateProject: vi.fn().mockImplementation(({ projectId, project }) =>
+    Promise.resolve({ ...savedProjects[0], id: projectId, ...project })),
+  deleteProject: vi.fn().mockResolvedValue(null),
   getProjectTasks: vi.fn().mockResolvedValue(savedProjectTasks),
+  createTask: vi.fn().mockImplementation(({ task }) =>
+    Promise.resolve({ id: 203, ...task })),
   updateTask: vi.fn().mockImplementation(({ taskId, task }) =>
     Promise.resolve({ id: taskId, ...task })),
   updateTaskStatus: vi.fn().mockImplementation(({ taskId, status }) =>
     Promise.resolve({ id: taskId, status })),
+  deleteTask: vi.fn().mockResolvedValue(null),
 });
 
 const logIn = async (user, client) => {
@@ -386,6 +400,31 @@ describe("AI project workshop", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Aug 14, 2026")).toBeInTheDocument();
     expect(screen.getByText("opportunity-intake")).toBeInTheDocument();
+  });
+
+  it("creates a project manually without invoking AI", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+    await screen.findByRole("heading", { name: /your projects/i });
+    await user.click(screen.getByRole("button", { name: /new project/i }));
+    await user.type(screen.getByLabelText(/project name/i), "Release checklist");
+    await user.type(screen.getByLabelText(/^objective$/i), "Ship the next release with confidence");
+    await user.click(screen.getByRole("button", { name: /^create project$/i }));
+
+    expect(client.createProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      project: {
+        name: "Release checklist",
+        objective: "Ship the next release with confidence",
+      },
+    });
+    expect(client.generateProject).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "Release checklist" }))
+      .toBeInTheDocument();
   });
 
   it("announces the selected navigation and project loading state", async () => {
@@ -595,9 +634,7 @@ describe("AI project workshop", () => {
     await screen.findByRole("heading", { name: /project board/i });
 
     await user.click(screen.getByRole("button", { name: /project settings/i }));
-    expect(screen.getByLabelText(/read-only project settings/i)).toHaveTextContent(
-      /current api does not support updating or deleting projects/i,
-    );
+    expect(screen.getByLabelText(/project settings form/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /plan next phase/i }));
 
@@ -611,6 +648,45 @@ describe("AI project workshop", () => {
     expect(screen.getByLabelText(/describe your project/i).value).toContain(
       "Job Application Tracker - Initial Backlog",
     );
+  });
+
+  it("edits and explicitly confirms deletion of an owned project", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /project settings/i }));
+    const name = screen.getByLabelText(/project name/i);
+    await user.clear(name);
+    await user.type(name, "Job search command center");
+    const objective = screen.getByLabelText(/^objective$/i);
+    await user.clear(objective);
+    await user.type(objective, "Track every application and next action");
+    await user.click(screen.getByRole("button", { name: /save project/i }));
+
+    expect(client.updateProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      project: {
+        name: "Job search command center",
+        objective: "Track every application and next action",
+      },
+    });
+    expect((await screen.findAllByText("Job search command center")).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /^delete project$/i }));
+    expect(screen.getByText(/deletes every ticket in this project/i)).toBeInTheDocument();
+    expect(client.deleteProject).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /yes, delete project/i }));
+
+    expect(client.deleteProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    expect(screen.queryByText("Job search command center")).not.toBeInTheDocument();
   });
 
   it("shows the authenticated account and signs out from its dedicated view", async () => {
