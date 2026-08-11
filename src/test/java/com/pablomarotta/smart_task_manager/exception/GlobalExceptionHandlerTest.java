@@ -2,7 +2,10 @@ package com.pablomarotta.smart_task_manager.exception;
 
 import com.pablomarotta.smart_task_manager.dto.ErrorDetails;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.server.ResponseStatusException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -22,5 +25,24 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(400, response.getStatus());
         assertEquals("User is not a member of this project", response.getMessage());
+    }
+
+    @Test
+    void responseStatusExceptionsKeepTheirIntendedHttpStatus() {
+        WebRequest request = mock(WebRequest.class);
+        when(request.getDescription(false)).thenReturn("uri=/api/projects/20/members/18");
+
+        ResponseEntity<ErrorDetails> response = new GlobalExceptionHandler()
+                .handleResponseStatusException(
+                        new ResponseStatusException(
+                                HttpStatus.BAD_REQUEST,
+                                "Project owner cannot be removed"
+                        ),
+                        request
+                );
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(400, response.getBody().getStatus());
+        assertEquals("Project owner cannot be removed", response.getBody().getMessage());
     }
 }

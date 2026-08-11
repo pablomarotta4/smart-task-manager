@@ -721,6 +721,7 @@ describe("AI project workshop", () => {
     await user.click(overdueTicket);
     const personalTicket = screen.getByRole("dialog", { name: /edit reconcile the inventory audit/i });
     expect(within(personalTicket).queryByLabelText(/^assignee$/i)).not.toBeInTheDocument();
+    expect(within(personalTicket).queryByLabelText(/^priority$/i)).not.toBeInTheDocument();
     expect(within(personalTicket).queryByRole("button", { name: /delete ticket/i }))
       .not.toBeInTheDocument();
     await user.click(within(personalTicket).getByRole("button", { name: /close ticket/i }));

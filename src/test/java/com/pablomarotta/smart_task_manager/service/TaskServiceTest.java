@@ -462,6 +462,26 @@ class TaskServiceTest {
     }
 
     @Test
+    void assignedContributorCannotChangePriorityThroughGeneralUpdate() {
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        existing.setAssignee(member);
+        existing.setPriority(Priority.MEDIUM);
+        TaskRequest request = taskRequest();
+        request.setAssigneeId(2L);
+        request.setPriority(Priority.URGENT);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob")).thenReturn(Optional.empty());
+        when(taskRepository.findByIdAndAssigneeUsername(101L, "bob")).thenReturn(Optional.of(existing));
+
+        assertThrows(
+                org.springframework.security.access.AccessDeniedException.class,
+                () -> taskService.updateTask(101L, request, "bob")
+        );
+
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
     void priorityMutationRejectsForeignTask() {
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
                 .thenReturn(Optional.empty());

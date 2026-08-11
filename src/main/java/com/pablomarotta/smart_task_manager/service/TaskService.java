@@ -281,6 +281,7 @@ public class TaskService {
             if (!task.getProject().getId().equals(taskRequest.getProjectId())) {
                 throw new IllegalArgumentException("Task cannot be moved to another project");
             }
+            assertContributorKeepsOwnerControlledFields(task, taskRequest, username);
 
             task.setTitle(validateTitle(taskRequest.getTitle()));
             task.setDescription(normalizeOptionalText(taskRequest.getDescription()));
@@ -409,6 +410,23 @@ public class TaskService {
         task.setAssignee(assigneeId == null
                 ? null
                 : getActiveProjectMember(task.getProject().getId(), assigneeId));
+    }
+
+    private void assertContributorKeepsOwnerControlledFields(
+            Task task,
+            TaskRequest request,
+            String username
+    ) {
+        if (task.getProject().getOwner().getUsername().equals(username)) {
+            return;
+        }
+        Long currentAssigneeId = task.getAssignee() == null ? null : task.getAssignee().getId();
+        if (!Objects.equals(currentAssigneeId, request.getAssigneeId())) {
+            throw new AccessDeniedException("Only the project owner can change task assignment");
+        }
+        if (!Objects.equals(task.getPriority(), request.getPriority())) {
+            throw new AccessDeniedException("Only the project owner can change task priority");
+        }
     }
 
     private com.pablomarotta.smart_task_manager.model.User getActiveProjectMember(

@@ -164,6 +164,7 @@ export default function MyWorkSection({
         <TicketDetailPanel
           key={selectedTask.id}
           task={selectedTask}
+          canManage={false}
           saving={savingTask}
           error={taskError}
           onClose={onCloseTask}

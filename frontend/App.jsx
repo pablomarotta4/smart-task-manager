@@ -135,6 +135,7 @@ export default function App({ client = apiClient }) {
   const handleOpenProjects = async (projectId = null) => {
     setActiveView("projects");
     setProjectError("");
+    setMemberError("");
     setProjectPhase("loading-projects");
     setSelectedProject(null);
     setProjectTasks([]);
@@ -166,6 +167,7 @@ export default function App({ client = apiClient }) {
     setProjectMembers([]);
     setSelectedTask(null);
     setProjectError("");
+    setMemberError("");
     setProjectPhase("loading-tasks");
     try {
       const [tasks, members] = await Promise.all([
@@ -270,6 +272,7 @@ export default function App({ client = apiClient }) {
   const handleOpenBoard = async (projectId = selectedProject?.id ?? null) => {
     setActiveView("board");
     setProjectError("");
+    setMemberError("");
     setProjectPhase("loading-projects");
     setProjectTasks([]);
     setProjectMembers([]);

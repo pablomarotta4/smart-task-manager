@@ -8,6 +8,7 @@ const labelFor = (value) => value.toLowerCase().replaceAll("_", " ");
 export default function TicketDetailPanel({
   task,
   members,
+  canManage = true,
   saving,
   deleting,
   error,
@@ -122,19 +123,21 @@ export default function TicketDetailPanel({
                 ))}
               </select>
             </div>
-            <div className="field-group">
-              <label htmlFor={`ticket-priority-${task.id}`}>Priority</label>
-              <select
-                id={`ticket-priority-${task.id}`}
-                name="priority"
-                value={draft.priority}
-                onChange={handleChange}
-              >
-                {PRIORITIES.map((priority) => (
-                  <option key={priority} value={priority}>{labelFor(priority)}</option>
-                ))}
-              </select>
-            </div>
+            {canManage ? (
+              <div className="field-group">
+                <label htmlFor={`ticket-priority-${task.id}`}>Priority</label>
+                <select
+                  id={`ticket-priority-${task.id}`}
+                  name="priority"
+                  value={draft.priority}
+                  onChange={handleChange}
+                >
+                  {PRIORITIES.map((priority) => (
+                    <option key={priority} value={priority}>{labelFor(priority)}</option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <div className="field-group">
               <label htmlFor={`ticket-due-${task.id}`}>Due date</label>
               <input
@@ -145,7 +148,7 @@ export default function TicketDetailPanel({
                 onChange={handleChange}
               />
             </div>
-            {members ? (
+            {canManage && members ? (
               <div className="field-group">
                 <label htmlFor={`ticket-assignee-${task.id}`}>Assignee</label>
                 <select
