@@ -127,4 +127,3 @@ later opaque 404.
 - Existing-work duplication and selected-ticket drift are visible quality failures.
 - Readiness reports a missing configured model before planning is attempted.
 - Tests, static analysis, builds, and live model probes pass before merge.
-

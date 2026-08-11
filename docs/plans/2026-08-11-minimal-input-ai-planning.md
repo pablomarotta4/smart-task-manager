@@ -175,4 +175,3 @@
    gates.
 5. Review the complete requirements against current evidence, commit documentation/fixes, and
    fast-forward merge the clean feature branch into `main` only when every required gate is proven.
-

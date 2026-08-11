@@ -19,16 +19,22 @@ The AI service cannot access the business database. Spring derives ownership fro
 principal, stores the draft, and performs confirmation in one transaction. A repeated confirmation is
 idempotent and returns the existing project.
 
-The LangGraph workflow is bounded:
+The LangGraph workflow is bounded and chooses the cheapest useful path:
 
 ```text
-analyze brief -> generate -> assess -> (passed) finalize
-                              (failed) revise once -> assess -> finalize
+new project:      analyze brief -> generate -> assess -> optional single revision -> finalize
+existing ticket:  derive selected criteria in code -> generate -> assess -> optional revision -> finalize
 ```
 
 Brief analysis extracts an explicit capability checklist. Assessment combines deterministic structure,
-repetition, actionability, and checklist-coverage checks. If the second output is still weak, the API
+repetition, actionability, checklist coverage, selected-ticket alignment, and existing-work duplication
+checks. Existing-ticket planning skips the LLM analyzer and compiles a relevance-ranked, token-budgeted
+project snapshot that always preserves the selected ticket. If the second output is still weak, the API
 returns it with `quality.passed=false`; valid JSON alone is not treated as a good plan.
+
+A minimal brief such as `CRM` produces an editable draft immediately. The planner fills non-critical
+gaps with visible assumptions and can return up to three editable, non-blocking `openQuestions`; it
+does not force a clarification interview before showing useful work.
 
 ## Run locally
 
@@ -81,7 +87,7 @@ npm run dev
 ```
 
 Open `http://localhost:3000`. Create an account or sign in, describe a project, review the quality
-evidence, edit the proposed project and tickets, and confirm when the draft is ready.
+evidence and open decisions, edit the proposed project and tickets, and confirm when the draft is ready.
 
 The authenticated workspace includes:
 
@@ -105,6 +111,10 @@ Useful configuration:
 - `AI_PLANNING_READ_TIMEOUT_MS` defaults to `180000`.
 - `SMART_TASK_AI_OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434`.
 - `SMART_TASK_AI_OLLAMA_MODEL` defaults to `llama3.2:3b`.
+- `SMART_TASK_AI_OLLAMA_CONTEXT_TOKENS` defaults to `8192`.
+- `SMART_TASK_AI_OLLAMA_OUTPUT_TOKENS` defaults to `2048`.
+- `SMART_TASK_AI_OLLAMA_SEED` optionally fixes the generation seed.
+- `SMART_TASK_AI_PLANNING_INPUT_TOKENS` defaults to `5000` and must leave room for output.
 - `JWT_EXPIRATION_MS` defaults to `900000` (15 minutes).
 - `JWT_REFRESH_EXPIRATION_MS` defaults to `604800000` (7 days).
 - `CORS_ALLOWED_ORIGINS` defaults to the local Vite origins on `localhost` and `127.0.0.1`.
@@ -158,6 +168,7 @@ Content-Type: application/json
     "objective": "...",
     "assumptions": [],
     "risks": [],
+    "openQuestions": ["Optional decisions to revisit; these do not block confirmation"],
     "tickets": ["the complete edited ticket objects from the draft response"]
   }
 }
@@ -187,6 +198,10 @@ cd ..
 mvn test
 ```
 
-The behavior gate reports ticket count, unique normalized-title ratio, maximum title similarity,
-description coverage, acceptance-criteria coverage, required-concept coverage, score, issue codes, and
-whether revision was needed.
+`GET http://127.0.0.1:8000/health` is process liveness. `GET /ready` additionally verifies that Ollama
+is reachable and the configured model is installed.
+
+The 30-case behavior gate reports ticket count, unique normalized-title ratio, maximum title
+similarity, description coverage, acceptance-criteria coverage, required-concept coverage, score,
+issue codes, revision, model-call count, prompt/output tokens, and provider duration. It includes
+minimal, contextual, adversarial, and 120/200-ticket capacity cases.
