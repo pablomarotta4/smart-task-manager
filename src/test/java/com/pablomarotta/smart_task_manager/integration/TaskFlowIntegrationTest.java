@@ -11,19 +11,26 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import javax.sql.DataSource;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-public class TaskFlowIntegrationTest {
+class TaskFlowIntegrationTest extends PostgresIntegrationTest {
+
+    private final MockMvc mockMvc;
+
+    private final ObjectMapper objectMapper;
 
     @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
+    TaskFlowIntegrationTest(DataSource dataSource, MockMvc mockMvc, ObjectMapper objectMapper) {
+        super(dataSource);
+        this.mockMvc = mockMvc;
+        this.objectMapper = objectMapper;
+    }
 
     @Test
     public void testFullTaskLifecycle() throws Exception {

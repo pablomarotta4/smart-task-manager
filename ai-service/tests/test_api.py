@@ -15,7 +15,8 @@ from smart_task_ai.contracts import (
     QualityReport,
     TicketDraft,
 )
-from smart_task_ai.ollama import ProviderResponseError, ProviderTimeout
+from smart_task_ai.correlation import get_correlation_id
+from smart_task_ai.ollama import OllamaPlanningModel, ProviderResponseError, ProviderTimeout
 from smart_task_ai.providers import ProviderReadiness
 
 
@@ -95,6 +96,21 @@ class FakeReadinessProbe:
         return self.result
 
 
+@dataclass
+class ProviderCallingPlanner:
+    model: OllamaPlanningModel
+
+    async def plan(
+        self,
+        *,
+        run_id: UUID,
+        prompt: str,
+        context: PlanningContext | None = None,
+    ) -> PlanningResponse:
+        await self.model.generate(system_prompt="system", user_prompt=prompt)
+        return response_for(run_id)
+
+
 async def test_health_endpoint_is_ready_without_calling_model() -> None:
     app = create_app(planner=FakePlanner())
     async with httpx.AsyncClient(
@@ -104,6 +120,118 @@ async def test_health_endpoint_is_ready_without_calling_model() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+async def test_propagates_safe_correlation_id_and_clears_request_context() -> None:
+    app = create_app(planner=FakePlanner())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get(
+            "/health",
+            headers={"X-Correlation-ID": "spring-request_2026.08:12"},
+        )
+
+    assert response.headers["X-Correlation-ID"] == "spring-request_2026.08:12"
+    assert get_correlation_id() is None
+
+
+async def test_replaces_unsafe_correlation_id_with_generated_uuid() -> None:
+    app = create_app(planner=FakePlanner())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get(
+            "/health",
+            headers={"X-Correlation-ID": "token=secret value\nnot-safe"},
+        )
+
+    generated_id = response.headers["X-Correlation-ID"]
+    assert UUID(generated_id).version == 4
+    assert "secret" not in generated_id
+    assert get_correlation_id() is None
+
+
+async def test_unexpected_failure_preserves_safe_correlation_id_without_details() -> None:
+    correlation_id = "spring-request-500"
+    failure_detail = "private planner failure"
+    app = create_app(planner=FakePlanner(failure=RuntimeError(failure_detail)))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/internal/v1/project-plans",
+            headers={"X-Correlation-ID": correlation_id},
+            json={
+                "contract_version": "v1",
+                "run_id": str(uuid4()),
+                "prompt": "Build a useful household budget application",
+            },
+        )
+
+    assert response.status_code == 500
+    assert response.headers["X-Correlation-ID"] == correlation_id
+    assert failure_detail not in response.text
+    assert get_correlation_id() is None
+
+
+async def test_unexpected_failure_replaces_unsafe_correlation_id() -> None:
+    unsafe_correlation_id = "token=private planner failure"
+    app = create_app(planner=FakePlanner(failure=RuntimeError("planner exploded")))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/internal/v1/project-plans",
+            headers={"X-Correlation-ID": unsafe_correlation_id},
+            json={
+                "contract_version": "v1",
+                "run_id": str(uuid4()),
+                "prompt": "Build a useful household budget application",
+            },
+        )
+
+    generated_id = response.headers["X-Correlation-ID"]
+    assert response.status_code == 500
+    assert UUID(generated_id).version == 4
+    assert "private" not in generated_id
+    assert get_correlation_id() is None
+
+
+async def test_propagates_correlation_id_to_model_provider() -> None:
+    correlation_id = "spring-request-2026-08-12"
+    provider_draft = response_for(uuid4()).draft
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["X-Correlation-ID"] == correlation_id
+        return httpx.Response(
+            200,
+            json={"message": {"content": provider_draft.model_dump_json()}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as provider_client:
+        model = OllamaPlanningModel(
+            base_url="http://ollama",
+            model="test",
+            client=provider_client,
+        )
+        app = create_app(planner=ProviderCallingPlanner(model))
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/internal/v1/project-plans",
+                headers={"X-Correlation-ID": correlation_id},
+                json={
+                    "contract_version": "v1",
+                    "run_id": str(uuid4()),
+                    "prompt": "Build a useful household budget application",
+                },
+            )
+
+    assert response.status_code == 200
 
 
 async def test_ready_endpoint_checks_the_configured_model() -> None:

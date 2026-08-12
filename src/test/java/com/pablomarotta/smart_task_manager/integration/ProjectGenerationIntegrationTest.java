@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
+import javax.sql.DataSource;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,27 +31,42 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(properties = "ai.ollama.enabled=false")
-class ProjectGenerationIntegrationTest {
+class ProjectGenerationIntegrationTest extends PostgresIntegrationTest {
 
-    @Autowired
-    private ProjectGenerationService generationService;
-    @Autowired
-    private ProjectGenerationConfirmationService confirmationService;
-    @Autowired
-    private ProjectGenerationRunRepository runRepository;
-    @Autowired
-    private ProjectRepository projectRepository;
-    @Autowired
-    private TaskRepository taskRepository;
-    @Autowired
-    private TaskAcceptanceCriterionRepository criterionRepository;
-    @Autowired
-    private TaskDependencyRepository dependencyRepository;
-    @Autowired
-    private UserRepository userRepository;
+    private final ProjectGenerationService generationService;
+    private final ProjectGenerationConfirmationService confirmationService;
+    private final ProjectGenerationRunRepository runRepository;
+    private final ProjectRepository projectRepository;
+    private final TaskRepository taskRepository;
+    private final TaskAcceptanceCriterionRepository criterionRepository;
+    private final TaskDependencyRepository dependencyRepository;
+    private final UserRepository userRepository;
 
     @MockBean
     private AIPlanningClient aiPlanningClient;
+
+    @Autowired
+    ProjectGenerationIntegrationTest(
+            DataSource dataSource,
+            ProjectGenerationService generationService,
+            ProjectGenerationConfirmationService confirmationService,
+            ProjectGenerationRunRepository runRepository,
+            ProjectRepository projectRepository,
+            TaskRepository taskRepository,
+            TaskAcceptanceCriterionRepository criterionRepository,
+            TaskDependencyRepository dependencyRepository,
+            UserRepository userRepository
+    ) {
+        super(dataSource);
+        this.generationService = generationService;
+        this.confirmationService = confirmationService;
+        this.runRepository = runRepository;
+        this.projectRepository = projectRepository;
+        this.taskRepository = taskRepository;
+        this.criterionRepository = criterionRepository;
+        this.dependencyRepository = dependencyRepository;
+        this.userRepository = userRepository;
+    }
 
     @BeforeEach
     void setUp() {

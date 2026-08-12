@@ -8,6 +8,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 
 from smart_task_ai.contracts import PlanningContext, PlanningRequest, PlanningResponse
+from smart_task_ai.correlation import CorrelationIdMiddleware
 from smart_task_ai.ollama import (
     OllamaPlanningModel,
     ProviderResponseError,
@@ -54,6 +55,7 @@ def create_app(
         readiness_probe = model
 
     app = FastAPI(title="Smart Task AI", version="1.0.0")
+    app.add_middleware(CorrelationIdMiddleware)
     router = APIRouter()
 
     @router.get("/health")

@@ -13,20 +13,27 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import org.slf4j.MDC;
 
 import java.util.UUID;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withResourceNotFound;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class FastApiAIPlanningClientTest {
+
+    private static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
+    private static final String CORRELATION_ID_MDC_KEY = "correlationId";
 
     private MockRestServiceServer server;
     private FastApiAIPlanningClient client;
@@ -68,6 +75,46 @@ class FastApiAIPlanningClientTest {
         assertEquals(3, response.draft().tickets().size());
         assertEquals(100, response.quality().score());
         assertEquals("fake-model", response.model());
+        server.verify();
+    }
+
+    @Test
+    void generatePlanPropagatesRequestCorrelationId() {
+        UUID runId = UUID.fromString("4cc8ab44-1d91-4b12-96ac-cba3824a7907");
+        MDC.put(CORRELATION_ID_MDC_KEY, "web-request-2026-08-12");
+        server.expect(once(), requestTo("http://ai-service:8000/internal/v1/project-plans"))
+                .andExpect(header(CORRELATION_ID_HEADER, "web-request-2026-08-12"))
+                .andRespond(withSuccess(successResponse(runId), MediaType.APPLICATION_JSON));
+
+        try {
+            client.generatePlan(runId, "Build a useful household budget application");
+        } finally {
+            MDC.remove(CORRELATION_ID_MDC_KEY);
+        }
+
+        server.verify();
+    }
+
+    @Test
+    void generatePlanReplacesUnsafeRequestCorrelationId() {
+        UUID runId = UUID.fromString("4cc8ab44-1d91-4b12-96ac-cba3824a7907");
+        String unsafeCorrelationId = "secret correlation value\nforged-header";
+        MDC.put(CORRELATION_ID_MDC_KEY, unsafeCorrelationId);
+        server.expect(once(), requestTo("http://ai-service:8000/internal/v1/project-plans"))
+                .andExpect(request -> {
+                    String outboundCorrelationId = request.getHeaders().getFirst(CORRELATION_ID_HEADER);
+                    assertNotNull(outboundCorrelationId);
+                    assertNotEquals(unsafeCorrelationId, outboundCorrelationId);
+                    assertEquals(4, UUID.fromString(outboundCorrelationId).version());
+                })
+                .andRespond(withSuccess(successResponse(runId), MediaType.APPLICATION_JSON));
+
+        try {
+            client.generatePlan(runId, "Build a useful household budget application");
+        } finally {
+            MDC.remove(CORRELATION_ID_MDC_KEY);
+        }
+
         server.verify();
     }
 

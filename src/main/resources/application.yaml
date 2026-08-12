@@ -33,6 +33,8 @@ spring:
           time_zone: UTC
 
 logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level correlationId=%X{correlationId:-} [%thread] %logger{36} - %msg%n"
   level:
     org.flywaydb: DEBUG
 

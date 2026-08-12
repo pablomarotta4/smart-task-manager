@@ -265,6 +265,7 @@ public class TaskService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public TaskResponse getTaskById(Long id, String username) {
         Task task = getEditableTask(id, username);
         return mapToResponse(task);

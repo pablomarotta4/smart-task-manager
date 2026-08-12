@@ -1,11 +1,13 @@
 package com.pablomarotta.smart_task_manager.client;
 
 import com.pablomarotta.smart_task_manager.config.AIPlanningProperties;
+import com.pablomarotta.smart_task_manager.config.CorrelationIdPolicy;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningRequest;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningContext;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningResponse;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -38,8 +40,16 @@ public class FastApiAIPlanningClient implements AIPlanningClient {
             AIPlanningContext context
     ) {
         try {
-            AIPlanningResponse response = restClient.post()
-                    .uri("/internal/v1/project-plans")
+            RestClient.RequestBodySpec request = restClient.post()
+                    .uri("/internal/v1/project-plans");
+            String correlationId = MDC.get(CorrelationIdPolicy.MDC_KEY);
+            if (correlationId != null) {
+                request.header(
+                        CorrelationIdPolicy.HEADER_NAME,
+                        CorrelationIdPolicy.resolve(correlationId)
+                );
+            }
+            AIPlanningResponse response = request
                     .body(new AIPlanningRequest(runId, prompt, context))
                     .retrieve()
                     .body(AIPlanningResponse.class);

@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:1/testcontainers_required
+    username: testcontainers_required
+    password: testcontainers_required
+  jpa:
+    show-sql: false
+  flyway:
+    clean-disabled: true
+
+ai:
+  ollama:
+    enabled: false
+
+logging:
+  level:
+    org.flywaydb: INFO

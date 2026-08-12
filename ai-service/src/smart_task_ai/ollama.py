@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from smart_task_ai.contracts import BriefAnalysis, ProjectDraft
+from smart_task_ai.correlation import CORRELATION_ID_HEADER, get_correlation_id
 from smart_task_ai.providers import (
     ModelCallMetadata,
     ModelCallMetric,
@@ -259,7 +260,11 @@ class OllamaPlanningModel:
         provider_duration_ms: float | None = None
         outcome: ModelCallOutcome = "provider_error"
         try:
-            response = await client.post(f"{self._base_url}/api/chat", json=payload)
+            response = await client.post(
+                f"{self._base_url}/api/chat",
+                json=payload,
+                headers=self._correlation_headers(),
+            )
             response.raise_for_status()
             body = cast(dict[str, object], response.json())
             prompt_tokens = self._non_negative_int(body.get("prompt_eval_count"))
@@ -327,6 +332,15 @@ class OllamaPlanningModel:
         return value if isinstance(value, int) and value >= 0 else 0
 
     @staticmethod
+    def _correlation_headers() -> dict[str, str]:
+        correlation_id = get_correlation_id()
+        return (
+            {CORRELATION_ID_HEADER: correlation_id}
+            if correlation_id is not None
+            else {}
+        )
+
+    @staticmethod
     def _validation_repair_hint(exc: ValidationError) -> str:
         findings: list[str] = []
         for error in exc.errors(
@@ -344,7 +358,10 @@ class OllamaPlanningModel:
         owns_client = self._client is None
         client = self._client or httpx.AsyncClient(timeout=self._timeout)
         try:
-            response = await client.get(f"{self._base_url}/api/tags")
+            response = await client.get(
+                f"{self._base_url}/api/tags",
+                headers=self._correlation_headers(),
+            )
             response.raise_for_status()
             body = cast(dict[str, object], response.json())
             raw_models = body.get("models")
