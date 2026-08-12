@@ -1,15 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { ApiError, apiClient } from "./api";
 import AccountSection from "./components/AccountSection";
 import BoardSection from "./components/BoardSection";
 import DraftEditor from "./components/DraftEditor";
+import ForgotPasswordView from "./components/ForgotPasswordView";
 import MyWorkSection from "./components/MyWorkSection";
 import ProjectsSection from "./components/ProjectsSection";
 import RecentPlanningRuns from "./components/RecentPlanningRuns";
+import ResetPasswordView from "./components/ResetPasswordView";
+import VerifyEmailView from "./components/VerifyEmailView";
 import useProjectWorkspace from "./hooks/useProjectWorkspace";
 
 const SESSION_KEY = "smart-task-session";
+const TOKEN_ACTION_PATHS = new Set(["/reset-password", "/verify-email"]);
+const PUBLIC_ACTION_PATHS = new Set(["/forgot-password", ...TOKEN_ACTION_PATHS]);
+
+const captureBrowserRoute = (tokenRef) => {
+  const path = window.location.pathname;
+  let token = null;
+  if (TOKEN_ACTION_PATHS.has(path)) {
+    if (tokenRef.current === undefined) {
+      tokenRef.current = new URLSearchParams(window.location.hash.slice(1)).get("token") || null;
+      if (window.location.hash) {
+        window.history.replaceState(
+          window.history.state,
+          "",
+          `${window.location.pathname}${window.location.search}`,
+        );
+      }
+    }
+    token = tokenRef.current;
+  }
+  return { path, token, ready: true };
+};
 
 class SessionChangedError extends Error {
   constructor() {
@@ -34,7 +58,15 @@ const errorMessage = (error) => {
 };
 
 export default function App({ client = apiClient }) {
+  const actionTokenRef = useRef(undefined);
+  const [browserRoute, setBrowserRoute] = useState(() => ({
+    path: window.location.pathname,
+    token: null,
+    ready: !TOKEN_ACTION_PATHS.has(window.location.pathname),
+  }));
   const [session, setSession] = useState(readSession);
+  const sessionUserIdRef = useRef(session?.user?.id ?? null);
+  sessionUserIdRef.current = session?.user?.id ?? null;
   const [sessionStatus, setSessionStatus] = useState(() => (
     sessionStorage.getItem(SESSION_KEY) ? "checking" : "ready"
   ));
@@ -55,14 +87,65 @@ export default function App({ client = apiClient }) {
   const [activeView, setActiveView] = useState("workshop");
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
+  const [verificationPhase, setVerificationPhase] = useState("idle");
+  const [verificationNotice, setVerificationNotice] = useState("");
+  const [verificationError, setVerificationError] = useState("");
   const [recentRuns, setRecentRuns] = useState([]);
   const [recentRunsPhase, setRecentRunsPhase] = useState("idle");
   const [recentRunsError, setRecentRunsError] = useState("");
   const [busyRunId, setBusyRunId] = useState(null);
   const recentRunsRequestId = useRef(0);
   const sessionRequestId = useRef(0);
+  const accountActionRequestId = useRef(0);
+  const verificationResendRequestId = useRef(0);
   const refreshPromise = useRef(null);
   const sessionToken = session?.token;
+  const isPublicActionRoute = PUBLIC_ACTION_PATHS.has(browserRoute.path);
+
+  const invalidateAccountAction = useCallback(() => {
+    accountActionRequestId.current += 1;
+  }, []);
+
+  const captureAccountActionContext = useCallback(() => ({
+    requestId: accountActionRequestId.current,
+    sessionRequestId: sessionRequestId.current,
+    userId: sessionUserIdRef.current,
+  }), []);
+
+  const isCurrentAccountAction = useCallback((context) => (
+    context?.requestId === accountActionRequestId.current
+    && context.sessionRequestId === sessionRequestId.current
+    && context.userId !== null
+    && context.userId === sessionUserIdRef.current
+  ), []);
+
+  const isCurrentVerificationResend = useCallback((context) => (
+    context.requestId === verificationResendRequestId.current
+    && context.sessionRequestId === sessionRequestId.current
+    && context.userId !== null
+    && context.userId === sessionUserIdRef.current
+  ), []);
+
+  useLayoutEffect(() => {
+    setBrowserRoute(captureBrowserRoute(actionTokenRef));
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      invalidateAccountAction();
+      actionTokenRef.current = undefined;
+      setBrowserRoute(captureBrowserRoute(actionTokenRef));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [invalidateAccountAction]);
+
+  const navigateTo = useCallback((path) => {
+    invalidateAccountAction();
+    actionTokenRef.current = undefined;
+    window.history.pushState(window.history.state, "", path);
+    setBrowserRoute({ path, token: null, ready: true });
+  }, [invalidateAccountAction]);
 
   const persistSession = useCallback((authenticated) => {
     const nextSession = { token: authenticated.token, user: authenticated.user };
@@ -74,6 +157,8 @@ export default function App({ client = apiClient }) {
   }, []);
 
   const clearWorkspaceSession = useCallback((notice = "") => {
+    invalidateAccountAction();
+    verificationResendRequestId.current += 1;
     sessionRequestId.current += 1;
     recentRunsRequestId.current += 1;
     refreshPromise.current = null;
@@ -96,7 +181,10 @@ export default function App({ client = apiClient }) {
     setRegistration({ fullName: "", email: "", username: "", password: "" });
     setError("");
     setPhase("idle");
-  }, []);
+    setVerificationPhase("idle");
+    setVerificationNotice("");
+    setVerificationError("");
+  }, [invalidateAccountAction]);
 
   const refreshAccessToken = useCallback(() => {
     if (refreshPromise.current) return refreshPromise.current;
@@ -158,8 +246,8 @@ export default function App({ client = apiClient }) {
   const workspace = useProjectWorkspace({
     client,
     executeAuthenticated: runAuthenticated,
-    sessionKey: session?.user?.id ?? null,
-    currentUserId: session?.user?.id ?? null,
+    sessionKey: isPublicActionRoute ? null : session?.user?.id ?? null,
+    currentUserId: isPublicActionRoute ? null : session?.user?.id ?? null,
   });
   const {
     projects,
@@ -182,7 +270,7 @@ export default function App({ client = apiClient }) {
   } = workspace;
 
   useEffect(() => {
-    if (!sessionToken || sessionStatus !== "checking") return undefined;
+    if (isPublicActionRoute || !sessionToken || sessionStatus !== "checking") return undefined;
     const requestId = sessionRequestId.current + 1;
     sessionRequestId.current = requestId;
     let active = true;
@@ -219,10 +307,17 @@ export default function App({ client = apiClient }) {
     return () => {
       active = false;
     };
-  }, [clearWorkspaceSession, client, persistSession, sessionStatus, sessionToken]);
+  }, [
+    clearWorkspaceSession,
+    client,
+    isPublicActionRoute,
+    persistSession,
+    sessionStatus,
+    sessionToken,
+  ]);
 
   const loadRecentRuns = useCallback(async () => {
-    if (!sessionToken || sessionStatus !== "ready") {
+    if (isPublicActionRoute || !sessionToken || sessionStatus !== "ready") {
       recentRunsRequestId.current += 1;
       setRecentRuns([]);
       return;
@@ -245,7 +340,7 @@ export default function App({ client = apiClient }) {
         setRecentRunsPhase("idle");
       }
     }
-  }, [client, runAuthenticated, sessionStatus, sessionToken]);
+  }, [client, isPublicActionRoute, runAuthenticated, sessionStatus, sessionToken]);
 
   useEffect(() => {
     void loadRecentRuns();
@@ -484,6 +579,72 @@ export default function App({ client = apiClient }) {
     }
   };
 
+  const handlePasswordReset = useCallback((actionContext) => {
+    if (isCurrentAccountAction(actionContext)) {
+      clearWorkspaceSession("Your password was reset. Sign in again.");
+    }
+  }, [clearWorkspaceSession, isCurrentAccountAction]);
+
+  const handleEmailVerified = useCallback(async (actionContext) => {
+    if (!isCurrentAccountAction(actionContext)) return;
+    try {
+      const user = await runAuthenticated((token) => client.getCurrentUser({ token }));
+      if (!isCurrentAccountAction(actionContext)) return;
+      setSession((current) => {
+        if (!current || current.user?.id !== actionContext.userId
+          || !isCurrentAccountAction(actionContext)) return current;
+        const nextSession = {
+          ...current,
+          user,
+        };
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify(nextSession));
+        return nextSession;
+      });
+    } catch {
+      return;
+    }
+  }, [client, isCurrentAccountAction, runAuthenticated]);
+
+  const handleReturnFromAccountAction = () => {
+    setActiveView(session ? "account" : "workshop");
+    navigateTo("/");
+  };
+
+  const handleResendEmailVerification = async () => {
+    const requestContext = {
+      requestId: verificationResendRequestId.current + 1,
+      sessionRequestId: sessionRequestId.current,
+      userId: sessionUserIdRef.current,
+    };
+    verificationResendRequestId.current = requestContext.requestId;
+    setVerificationNotice("");
+    setVerificationError("");
+    setVerificationPhase("sending");
+    try {
+      await runAuthenticated((token) => client.resendEmailVerification({ token }));
+      if (!isCurrentVerificationResend(requestContext)) return;
+      setVerificationNotice(
+        "If verification is still needed, a fresh link will arrive shortly.",
+      );
+    } catch (requestError) {
+      if (!isCurrentVerificationResend(requestContext)) return;
+      if (requestError instanceof SessionChangedError) return;
+      if (requestError instanceof ApiError && requestError.status === 429) {
+        setVerificationError(
+          `Too many requests. Try again${requestError.retryAfterSeconds
+            ? ` in ${requestError.retryAfterSeconds} seconds`
+            : " later"}.`,
+        );
+      } else if (!(requestError instanceof ApiError && requestError.status === 401)) {
+        setVerificationError("We couldn't resend the verification email. Try again.");
+      }
+    } finally {
+      if (isCurrentVerificationResend(requestContext)) {
+        setVerificationPhase("idle");
+      }
+    }
+  };
+
   const handleLogout = async () => {
     setPhase("logging-out");
     let notice = "";
@@ -504,6 +665,39 @@ export default function App({ client = apiClient }) {
       clearWorkspaceSession(notice);
     }
   };
+
+  if (isPublicActionRoute) {
+    if (!browserRoute.ready) {
+      return (
+        <main className="account-action-shell">
+          <p className="account-action-loading" role="status">Preparing your secure link…</p>
+        </main>
+      );
+    }
+    if (browserRoute.path === "/forgot-password") {
+      return <ForgotPasswordView client={client} onReturnToLogin={handleReturnFromAccountAction} />;
+    }
+    if (browserRoute.path === "/reset-password") {
+      return (
+        <ResetPasswordView
+          client={client}
+          token={browserRoute.token}
+          onPasswordReset={handlePasswordReset}
+          captureActionContext={captureAccountActionContext}
+          onReturnToLogin={handleReturnFromAccountAction}
+        />
+      );
+    }
+    return (
+      <VerifyEmailView
+        client={client}
+        token={browserRoute.token}
+        onVerified={handleEmailVerified}
+        captureActionContext={captureAccountActionContext}
+        onReturn={handleReturnFromAccountAction}
+      />
+    );
+  }
 
   if (session && sessionStatus !== "ready") {
     return (
@@ -683,6 +877,15 @@ export default function App({ client = apiClient }) {
                 <span aria-hidden="true">↗</span>
               </button>
             </form>
+            {authMode === "login" ? (
+              <button
+                className="text-action forgot-password-action"
+                type="button"
+                onClick={() => navigateTo("/forgot-password")}
+              >
+                Forgot password?
+              </button>
+            ) : null}
             <p className="local-note">
               Access stays in this tab. A protected HttpOnly cookie renews it when needed.
             </p>
@@ -819,6 +1022,10 @@ export default function App({ client = apiClient }) {
           user={session.user}
           onLogout={handleLogout}
           loggingOut={phase === "logging-out"}
+          onResendVerification={handleResendEmailVerification}
+          resendingVerification={verificationPhase === "sending"}
+          verificationNotice={verificationNotice}
+          verificationError={verificationError}
         />
       ) : (
         <>

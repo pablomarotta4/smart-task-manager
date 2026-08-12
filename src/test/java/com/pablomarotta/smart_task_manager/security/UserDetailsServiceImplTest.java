@@ -31,13 +31,15 @@ class UserDetailsServiceImplTest {
         when(userRepository.findByUsername("alice"))
                 .thenReturn(Optional.of(user("alice", Role.USER, true)));
 
-        UserDetails details = userDetailsService.loadUserByUsername("alice");
+        AuthenticatedUserPrincipal details = (AuthenticatedUserPrincipal) userDetailsService.loadUserByUsername("alice");
 
         assertEquals(
                 java.util.List.of("ROLE_USER"),
                 details.getAuthorities().stream().map(Object::toString).toList()
         );
         assertTrue(details.isEnabled());
+        assertEquals(17L, details.getUserId());
+        assertEquals(3, details.getAuthVersion());
     }
 
     @Test
@@ -45,7 +47,7 @@ class UserDetailsServiceImplTest {
         when(userRepository.findByUsername("admin"))
                 .thenReturn(Optional.of(user("admin", Role.ADMIN, false)));
 
-        UserDetails details = userDetailsService.loadUserByUsername("admin");
+        AuthenticatedUserPrincipal details = (AuthenticatedUserPrincipal) userDetailsService.loadUserByUsername("admin");
 
         assertEquals(
                 java.util.List.of("ROLE_ADMIN"),
@@ -57,9 +59,11 @@ class UserDetailsServiceImplTest {
     private User user(String username, Role role, boolean active) {
         return User.builder()
                 .username(username)
+                .id(17L)
                 .password("encoded")
                 .role(role)
                 .active(active)
+                .authVersion(3)
                 .build();
     }
 }

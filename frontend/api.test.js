@@ -80,6 +80,112 @@ describe("project API client", () => {
     );
   });
 
+  it("keeps account-action tokens in JSON request bodies", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.requestPasswordReset({ email: "person@example.com" });
+    await client.confirmPasswordReset({
+      token: "reset-token.secret",
+      password: "UpdatedPassword123!",
+    });
+    await client.confirmEmailVerification({ token: "verify-token.secret" });
+    await client.resendEmailVerification({ token: "access-token" });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/auth/password-reset/request",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "person@example.com" }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/auth/password-reset/confirm",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          token: "reset-token.secret",
+          password: "UpdatedPassword123!",
+        }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "http://api.test/api/auth/email-verification/confirm",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ token: "verify-token.secret" }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      4,
+      "http://api.test/api/auth/email-verification/resend",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer access-token" }),
+      }),
+    );
+    expect(fetchImpl.mock.calls.map(([url]) => url).join(" "))
+      .not.toContain("reset-token.secret");
+    expect(fetchImpl.mock.calls.map(([url]) => url).join(" "))
+      .not.toContain("verify-token.secret");
+  });
+
+  it("exposes only stable error metadata and bounded retry guidance", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ code: "ACCOUNT_ACTION_EXPIRED", message: "do not render me" }),
+        {
+          status: 410,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": "45",
+          },
+        },
+      ))
+      .mockResolvedValueOnce(jsonResponse({ code: "not-a-stable-code" }, 400));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await expect(client.confirmEmailVerification({ token: "expired" }))
+      .rejects.toEqual(expect.objectContaining({
+        code: "ACCOUNT_ACTION_EXPIRED",
+        retryAfterSeconds: 45,
+        retryable: false,
+      }));
+    await expect(client.confirmEmailVerification({ token: "invalid" }))
+      .rejects.toEqual(expect.objectContaining({
+        code: undefined,
+        retryAfterSeconds: undefined,
+        retryable: false,
+      }));
+  });
+
+  it("marks network and rate-limit failures as retryable", async () => {
+    const rateLimited = new Response(JSON.stringify({ message: "backend copy" }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": "12" },
+    });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(rateLimited)
+      .mockRejectedValueOnce(new TypeError("offline"));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await expect(client.requestPasswordReset({ email: "person@example.com" }))
+      .rejects.toEqual(expect.objectContaining({
+        status: 429,
+        retryAfterSeconds: 12,
+        retryable: true,
+      }));
+    await expect(client.requestPasswordReset({ email: "person@example.com" }))
+      .rejects.toEqual(expect.objectContaining({ retryable: true }));
+  });
+
   it("generates a project with bearer authentication", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ runId: "run-1" }, 201));
     const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });

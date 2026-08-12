@@ -60,4 +60,19 @@ class GlobalExceptionHandlerTest {
         assertEquals(409, response.getStatus());
         assertEquals("Request conflicts with current resource state", response.getMessage());
     }
+
+    @Test
+    void unexpectedErrorsUseTheGenericContractWithoutDisclosingTheCause() {
+        WebRequest request = mock(WebRequest.class);
+        when(request.getDescription(false)).thenReturn("uri=/api/auth/password-reset/confirm");
+
+        ErrorDetails response = new GlobalExceptionHandler().handleGlobalException(
+                new IllegalStateException("raw token and database endpoint must not reach the client"),
+                request
+        );
+
+        assertEquals(500, response.getStatus());
+        assertEquals("Unexpected server error", response.getMessage());
+        assertEquals("Request failed", response.getDetails());
+    }
 }

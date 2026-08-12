@@ -2,15 +2,27 @@ package com.pablomarotta.smart_task_manager.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.dto.LoginRequest;
+import com.pablomarotta.smart_task_manager.dto.PasswordResetConfirmRequest;
+import com.pablomarotta.smart_task_manager.dto.PasswordResetRequest;
+import com.pablomarotta.smart_task_manager.dto.EmailVerificationConfirmRequest;
 import com.pablomarotta.smart_task_manager.dto.RegisterRequest;
 import com.pablomarotta.smart_task_manager.dto.UserResponse;
+import com.pablomarotta.smart_task_manager.exception.AccountActionErrorCode;
+import com.pablomarotta.smart_task_manager.exception.AccountActionException;
 import com.pablomarotta.smart_task_manager.exception.GlobalExceptionHandler;
 import com.pablomarotta.smart_task_manager.exception.UserDuplicatedException;
+import com.pablomarotta.smart_task_manager.security.AuthRateLimitExceededException;
+import com.pablomarotta.smart_task_manager.security.AuthRateLimiter;
+import com.pablomarotta.smart_task_manager.security.ClientIpResolver;
+import com.pablomarotta.smart_task_manager.security.AuthenticatedUserPrincipal;
 import com.pablomarotta.smart_task_manager.security.JwtTokenProvider;
 import com.pablomarotta.smart_task_manager.security.UserDetailsServiceImpl;
+import com.pablomarotta.smart_task_manager.service.AccountActionService;
+import com.pablomarotta.smart_task_manager.service.AccountRegistrationService;
 import com.pablomarotta.smart_task_manager.service.RefreshTokenService;
 import com.pablomarotta.smart_task_manager.service.UserService;
 import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -29,6 +41,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDateTime;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.hamcrest.Matchers.containsString;
@@ -56,6 +72,18 @@ class AuthControllerTest {
     private JwtTokenProvider jwtTokenProvider;
 
     @MockBean
+    private AuthRateLimiter authRateLimiter;
+
+    @MockBean
+    private ClientIpResolver clientIpResolver;
+
+    @MockBean
+    private AccountActionService accountActionService;
+
+    @MockBean
+    private AccountRegistrationService accountRegistrationService;
+
+    @MockBean
     private UserService userService;
 
     @MockBean
@@ -64,15 +92,26 @@ class AuthControllerTest {
     @MockBean
     private UserDetailsServiceImpl userDetailsService;
 
+    @BeforeEach
+    void useLoopbackAddressWhenTheClientIpResolverIsNotUnderTest() {
+        when(clientIpResolver.resolve(any())).thenReturn("127.0.0.1");
+    }
+
     @Test
     void login_ShouldReturnTokenAndUser() throws Exception {
         LoginRequest loginRequest = new LoginRequest();
         loginRequest.setUsername("testuser");
         loginRequest.setPassword("password");
 
-        Authentication authentication = new UsernamePasswordAuthenticationToken("testuser", "password");
+        AuthenticatedUserPrincipal authenticatedPrincipal = authenticatedPrincipal(37L, "testuser", 5);
+        Authentication authentication = new UsernamePasswordAuthenticationToken(
+                authenticatedPrincipal,
+                null,
+                authenticatedPrincipal.getAuthorities()
+        );
         when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class))).thenReturn(authentication);
-        when(jwtTokenProvider.generateToken("testuser")).thenReturn("token");
+        when(clientIpResolver.resolve(any())).thenReturn("198.51.100.10");
+        when(jwtTokenProvider.generateToken("testuser", 37L, 5)).thenReturn("token");
 
         UserResponse userResponse = new UserResponse();
         userResponse.setId(1L);
@@ -81,8 +120,8 @@ class AuthControllerTest {
         userResponse.setFullName("Test User");
         userResponse.setRole("USER");
         when(userService.getUserByUsername("testuser")).thenReturn(userResponse);
-        when(refreshTokenService.issueForUsername("testuser"))
-                .thenReturn(issuedRefreshToken("refresh-login", "testuser"));
+        when(refreshTokenService.issueForPrincipal(authenticatedPrincipal))
+                .thenReturn(issuedRefreshToken("refresh-login", "testuser", 37L, 5));
 
         mockMvc.perform(post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -100,6 +139,26 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.token").value("token"))
                 .andExpect(jsonPath("$.type").value("Bearer"))
                 .andExpect(jsonPath("$.user.username").value("testuser"));
+
+        verify(jwtTokenProvider).generateToken("testuser", 37L, 5);
+        verify(refreshTokenService).issueForPrincipal(authenticatedPrincipal);
+        verify(clientIpResolver).resolve(any());
+    }
+
+    @Test
+    void loginRejectsAnAuthenticationWithoutAnObservedUserIdentity() throws Exception {
+        LoginRequest loginRequest = new LoginRequest();
+        loginRequest.setUsername("testuser");
+        loginRequest.setPassword("password");
+        when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
+                .thenReturn(new UsernamePasswordAuthenticationToken("testuser", "password"));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isUnauthorized());
+
+        verify(refreshTokenService, never()).issueForUsername(anyString());
     }
 
     @Test
@@ -132,10 +191,10 @@ class AuthControllerTest {
         userResponse.setFullName("New User");
         userResponse.setRole("USER");
 
-        when(userService.createUser(any())).thenReturn(userResponse);
-        when(jwtTokenProvider.generateToken("newuser")).thenReturn("token");
+        when(accountRegistrationService.register(any())).thenReturn(userResponse);
+        when(jwtTokenProvider.generateToken("newuser", 38L, 0)).thenReturn("token");
         when(refreshTokenService.issueForUsername("newuser"))
-                .thenReturn(issuedRefreshToken("refresh-register", "newuser"));
+                .thenReturn(issuedRefreshToken("refresh-register", "newuser", 38L, 0));
 
         mockMvc.perform(post("/api/auth/register")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -147,6 +206,85 @@ class AuthControllerTest {
                 ))
                 .andExpect(jsonPath("$.token").value("token"))
                 .andExpect(jsonPath("$.user.username").value("newuser"));
+
+        verify(accountRegistrationService).register(any());
+    }
+
+    @Test
+    void passwordResetRequestAlwaysReturnsAcceptedForTheGenericPublicResponse() throws Exception {
+        PasswordResetRequest request = new PasswordResetRequest("unknown@example.com");
+
+        mockMvc.perform(post("/api/auth/password-reset/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isAccepted())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(""));
+
+        verify(accountActionService).requestPasswordReset("unknown@example.com");
+    }
+
+    @Test
+    void passwordResetConfirmReturnsNoContentWhenTheActionIsConsumed() throws Exception {
+        PasswordResetConfirmRequest request = new PasswordResetConfirmRequest("action-token", "new-password");
+
+        mockMvc.perform(post("/api/auth/password-reset/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        verify(accountActionService).confirmPasswordReset("action-token", "new-password");
+    }
+
+    @Test
+    void passwordResetConfirmReturnsTheStableSupersededActionCode() throws Exception {
+        PasswordResetConfirmRequest request = new PasswordResetConfirmRequest("old-action-token", "new-password");
+        doThrow(new AccountActionException(AccountActionErrorCode.ACCOUNT_ACTION_SUPERSEDED))
+                .when(accountActionService).confirmPasswordReset("old-action-token", "new-password");
+
+        mockMvc.perform(post("/api/auth/password-reset/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_ACTION_SUPERSEDED"));
+    }
+
+    @Test
+    void emailVerificationConfirmReturnsNoContentWhenTheActionIsConsumed() throws Exception {
+        EmailVerificationConfirmRequest request = new EmailVerificationConfirmRequest("action-token");
+
+        mockMvc.perform(post("/api/auth/email-verification/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNoContent());
+
+        verify(accountActionService).confirmEmailVerification("action-token");
+    }
+
+    @Test
+    @WithMockUser(username = "testuser")
+    void emailVerificationResendUsesTheAuthenticatedUsernameAndReturnsAccepted() throws Exception {
+        mockMvc.perform(post("/api/auth/email-verification/resend"))
+                .andExpect(status().isAccepted());
+
+        verify(accountActionService).resendEmailVerification("testuser");
+    }
+
+    @Test
+    void rateLimitIsCheckedBeforeLoginAuthentication() throws Exception {
+        LoginRequest loginRequest = new LoginRequest();
+        loginRequest.setUsername("testuser");
+        loginRequest.setPassword("password");
+        doThrow(new AuthRateLimitExceededException(30)).when(authRateLimiter)
+                .check(any(), anyString(), anyCollection());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string(HttpHeaders.RETRY_AFTER, "30"));
+
+        verify(authenticationManager, never()).authenticate(any());
     }
 
     @Test
@@ -157,7 +295,7 @@ class AuthControllerTest {
         registerRequest.setPassword("password");
         registerRequest.setFullName("Existing User");
 
-        when(userService.createUser(any()))
+        when(accountRegistrationService.register(any()))
                 .thenThrow(new UserDuplicatedException("User already exists"));
 
         mockMvc.perform(post("/api/auth/register")
@@ -190,8 +328,8 @@ class AuthControllerTest {
         userResponse.setFullName("Test User");
         userResponse.setRole("USER");
         when(refreshTokenService.rotate("current-refresh"))
-                .thenReturn(issuedRefreshToken("replacement-refresh", "testuser"));
-        when(jwtTokenProvider.generateToken("testuser")).thenReturn("replacement-access");
+                .thenReturn(issuedRefreshToken("replacement-refresh", "testuser", 37L, 5));
+        when(jwtTokenProvider.generateToken("testuser", 37L, 5)).thenReturn("replacement-access");
         when(userService.getUserByUsername("testuser")).thenReturn(userResponse);
 
         mockMvc.perform(post("/api/auth/refresh")
@@ -203,6 +341,8 @@ class AuthControllerTest {
                 ))
                 .andExpect(jsonPath("$.token").value("replacement-access"))
                 .andExpect(jsonPath("$.user.username").value("testuser"));
+
+        verify(jwtTokenProvider).generateToken("testuser", 37L, 5);
     }
 
     @Test
@@ -247,11 +387,29 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.username").value("testuser"));
     }
 
-    private RefreshTokenService.IssuedRefreshToken issuedRefreshToken(String value, String username) {
+    private RefreshTokenService.IssuedRefreshToken issuedRefreshToken(
+            String value,
+            String username,
+            Long userId,
+            int authVersion
+    ) {
         return new RefreshTokenService.IssuedRefreshToken(
                 value,
                 username,
+                userId,
+                authVersion,
                 LocalDateTime.now().plusDays(7)
+        );
+    }
+
+    private AuthenticatedUserPrincipal authenticatedPrincipal(Long userId, String username, int authVersion) {
+        return new AuthenticatedUserPrincipal(
+                userId,
+                username,
+                "encoded-password",
+                "USER",
+                authVersion,
+                true
         );
     }
 }

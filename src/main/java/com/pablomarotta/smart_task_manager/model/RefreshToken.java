@@ -18,6 +18,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Entity
 @Table(name = "refresh_tokens")
@@ -38,6 +39,9 @@ public class RefreshToken {
 
     @Column(name = "token_hash", nullable = false, unique = true, length = 64)
     private String tokenHash;
+
+    @Column(name = "family_id", nullable = false, updatable = false)
+    private UUID familyId;
 
     @Column(name = "issued_at", nullable = false)
     private LocalDateTime issuedAt;

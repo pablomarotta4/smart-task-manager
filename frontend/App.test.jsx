@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, StrictMode } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +12,8 @@ const authenticatedUser = {
     id: 18,
     username: "pablo-local",
     fullName: "Pablo Local Tester",
+    email: "pablo@example.com",
+    emailVerified: true,
   },
 };
 
@@ -274,6 +276,10 @@ const createClient = () => ({
   getCurrentUser: vi.fn().mockResolvedValue(authenticatedUser.user),
   refreshSession: vi.fn().mockResolvedValue(authenticatedUser),
   logout: vi.fn().mockResolvedValue(null),
+  requestPasswordReset: vi.fn().mockResolvedValue(null),
+  confirmPasswordReset: vi.fn().mockResolvedValue(null),
+  confirmEmailVerification: vi.fn().mockResolvedValue(null),
+  resendEmailVerification: vi.fn().mockResolvedValue(null),
   generateProject: vi.fn().mockResolvedValue(generatedDraft),
   generateTaskPlan: vi.fn().mockResolvedValue(generatedDraft),
   confirmProject: vi.fn(),
@@ -341,6 +347,7 @@ const generateDraft = async (user, client) => {
 describe("AI project workshop", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    window.history.replaceState({}, "", "/");
   });
 
   it("signs in and opens the prompt workspace", async () => {
@@ -383,6 +390,220 @@ describe("AI project workshop", () => {
     });
     expect(await screen.findByText("New Planner")).toBeInTheDocument();
     expect(sessionStorage.getItem("smart-task-session")).toContain("registered-token");
+  });
+
+  it("requests a reset without disclosing whether the email exists", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /forgot password/i }));
+    expect(window.location.pathname).toBe("/forgot-password");
+    await user.type(screen.getByLabelText(/account email/i), "missing@example.com");
+    await user.click(screen.getByRole("button", { name: /send reset link/i }));
+
+    expect(client.requestPasswordReset).toHaveBeenCalledWith({
+      email: "missing@example.com",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If an account matches that email, a reset link will arrive shortly.",
+    );
+  });
+
+  it("removes the reset token fragment before confirmation and posts it only on user action", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const rawToken = "reset.header.payload.signature";
+    window.history.replaceState({}, "", `/reset-password#token=${rawToken}`);
+
+    render(<StrictMode><App client={client} /></StrictMode>);
+
+    expect(window.location.hash).toBe("");
+    expect(document.body).not.toHaveTextContent(rawToken);
+    expect(client.confirmPasswordReset).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText(/^new password$/i), "UpdatedPassword123!");
+    await user.type(screen.getByLabelText(/confirm new password/i), "UpdatedPassword123!");
+    await user.click(screen.getByRole("button", { name: /^reset password$/i }));
+
+    expect(client.confirmPasswordReset).toHaveBeenCalledWith({
+      token: rawToken,
+      password: "UpdatedPassword123!",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Your password has been reset. You can sign in with the new password.",
+    );
+    expect(document.body).not.toHaveTextContent(rawToken);
+  });
+
+  it("fails closed when a reset link has no fragment token", () => {
+    const client = createClient();
+    window.history.replaceState({}, "", "/reset-password");
+
+    render(<App client={client} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("This reset link is incomplete.");
+    expect(screen.queryByRole("button", { name: /^reset password$/i })).not.toBeInTheDocument();
+    expect(client.confirmPasswordReset).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ACCOUNT_ACTION_INVALID", "This reset link is invalid."],
+    ["ACCOUNT_ACTION_EXPIRED", "This reset link has expired."],
+    ["ACCOUNT_ACTION_USED", "This reset link has already been used."],
+    ["ACCOUNT_ACTION_SUPERSEDED", "A newer reset link replaced this one."],
+  ])("renders the stable %s reset state without backend copy", async (code, copy) => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmPasswordReset.mockRejectedValue(
+      new ApiError("sensitive backend message", { status: 410, code }),
+    );
+    window.history.replaceState({}, "", "/reset-password#token=private-token");
+
+    render(<App client={client} />);
+    await user.type(screen.getByLabelText(/^new password$/i), "UpdatedPassword123!");
+    await user.type(screen.getByLabelText(/confirm new password/i), "UpdatedPassword123!");
+    await user.click(screen.getByRole("button", { name: /^reset password$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy);
+    expect(document.body).not.toHaveTextContent("sensitive backend message");
+    expect(document.body).not.toHaveTextContent("private-token");
+  });
+
+  it("verifies email only after an explicit action and removes its fragment", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const rawToken = "verify.header.payload.signature";
+    window.history.replaceState({}, "", `/verify-email#token=${rawToken}`);
+
+    render(<App client={client} />);
+
+    expect(window.location.hash).toBe("");
+    expect(client.confirmEmailVerification).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveTextContent(rawToken);
+    await user.click(screen.getByRole("button", { name: /^verify email$/i }));
+
+    expect(client.confirmEmailVerification).toHaveBeenCalledWith({ token: rawToken });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Your email is verified.",
+    );
+  });
+
+  it("reconciles verification against the authenticated account instead of inferring it from the link", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const unverifiedSession = {
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    };
+    sessionStorage.setItem("smart-task-session", JSON.stringify(unverifiedSession));
+    client.getCurrentUser.mockResolvedValue(unverifiedSession.user);
+    window.history.replaceState({}, "", "/verify-email#token=another-accounts-token");
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /^verify email$/i }));
+
+    await waitFor(() => expect(client.getCurrentUser).toHaveBeenCalledWith({ token: "jwt-token" }));
+    expect(JSON.parse(sessionStorage.getItem("smart-task-session"))).toEqual(unverifiedSession);
+  });
+
+  it("does not clear a newer session when a delayed password reset completes after navigation", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const secondSession = {
+      token: "second-user-token",
+      user: {
+        id: 22,
+        username: "second-user",
+        fullName: "Second User",
+        email: "second@example.com",
+        emailVerified: false,
+      },
+    };
+    let resolveReset;
+    client.confirmPasswordReset.mockReturnValue(new Promise((resolve) => {
+      resolveReset = resolve;
+    }));
+    client.login.mockResolvedValue(secondSession);
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    window.history.replaceState({}, "", "/reset-password#token=reset-token");
+
+    render(<App client={client} />);
+    await user.type(screen.getByLabelText(/^new password$/i), "UpdatedPassword123!");
+    await user.type(screen.getByLabelText(/confirm new password/i), "UpdatedPassword123!");
+    await user.click(screen.getByRole("button", { name: /^reset password$/i }));
+    await user.click(screen.getByRole("button", { name: /return to sign in/i }));
+    await screen.findByRole("heading", { name: /^account$/i });
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+    await screen.findByRole("heading", { name: /enter the project workshop/i });
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    await screen.findByText("Second User");
+
+    await act(async () => {
+      resolveReset(null);
+    });
+
+    expect(sessionStorage.getItem("smart-task-session")).toContain("second-user-token");
+    expect(screen.getByText("Second User")).toBeInTheDocument();
+  });
+
+  it("does not update a newer session when delayed email verification completes after navigation", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const firstSession = {
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    };
+    const secondSession = {
+      token: "second-user-token",
+      user: {
+        id: 22,
+        username: "second-user",
+        fullName: "Second User",
+        email: "second@example.com",
+        emailVerified: false,
+      },
+    };
+    let resolveVerification;
+    client.confirmEmailVerification.mockReturnValue(new Promise((resolve) => {
+      resolveVerification = resolve;
+    }));
+    client.login.mockResolvedValue(secondSession);
+    sessionStorage.setItem("smart-task-session", JSON.stringify(firstSession));
+    window.history.replaceState({}, "", "/verify-email#token=first-accounts-token");
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /^verify email$/i }));
+    await user.click(screen.getByRole("button", { name: /return to workspace/i }));
+    await screen.findByRole("heading", { name: /^account$/i });
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+    await screen.findByRole("heading", { name: /enter the project workshop/i });
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    await screen.findByText("Second User");
+
+    await act(async () => {
+      resolveVerification(null);
+    });
+
+    expect(JSON.parse(sessionStorage.getItem("smart-task-session"))).toEqual(secondSession);
+    expect(screen.getByText("Second User")).toBeInTheDocument();
+  });
+
+  it("does not start private workspace requests while presenting an action link", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    window.history.replaceState({}, "", "/verify-email#token=private-token");
+
+    render(<StrictMode><App client={client} /></StrictMode>);
+    await act(async () => {});
+
+    expect(window.location.hash).toBe("");
+    expect(client.getCurrentUser).not.toHaveBeenCalled();
+    expect(client.getGenerationRuns).not.toHaveBeenCalled();
+    expect(client.confirmEmailVerification).not.toHaveBeenCalled();
   });
 
   it("validates a stored session before restoring the workspace", async () => {
@@ -1544,12 +1765,152 @@ describe("AI project workshop", () => {
     const account = accountTitle.closest("section");
     expect(within(account).getByText("Pablo Local Tester")).toBeInTheDocument();
     expect(within(account).getByText("pablo-local")).toBeInTheDocument();
+    expect(within(account).getByText("Email verified")).toBeInTheDocument();
+    expect(within(account).queryByRole("button", { name: /resend verification/i }))
+      .not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
 
     expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
       .toBeInTheDocument();
     expect(client.logout).toHaveBeenCalledTimes(1);
     expect(sessionStorage.getItem("smart-task-session")).toBeNull();
+  });
+
+  it("shows unverified account state and accepts a generic resend request", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.login.mockResolvedValue({
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    expect(screen.getByText("Verification pending")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+
+    expect(client.resendEmailVerification).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If verification is still needed, a fresh link will arrive shortly.",
+    );
+  });
+
+  it("does not show a previous account's resend result after another user signs in", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const firstSession = {
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    };
+    const secondSession = {
+      token: "second-user-token",
+      user: {
+        id: 22,
+        username: "second-user",
+        fullName: "Second User",
+        email: "second@example.com",
+        emailVerified: false,
+      },
+    };
+    let resolveFirstResend;
+    let resolveSecondResend;
+    client.login
+      .mockResolvedValueOnce(firstSession)
+      .mockResolvedValueOnce(secondSession);
+    client.resendEmailVerification
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFirstResend = resolve;
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecondResend = resolve;
+      }));
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+    await screen.findByRole("heading", { name: /enter the project workshop/i });
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    await screen.findByText("Second User");
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+    expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+
+    await act(async () => {
+      resolveFirstResend(null);
+    });
+
+    expect(JSON.parse(sessionStorage.getItem("smart-task-session"))).toEqual(secondSession);
+    expect(screen.queryByText("If verification is still needed, a fresh link will arrive shortly."))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+
+    await act(async () => {
+      resolveSecondResend(null);
+    });
+  });
+
+  it("uses retry guidance for verification resend without rendering backend messages", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.login.mockResolvedValue({
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    client.resendEmailVerification.mockRejectedValue(
+      new ApiError("internal throttle details", {
+        status: 429,
+        retryAfterSeconds: 30,
+        retryable: true,
+      }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many requests. Try again in 30 seconds.",
+    );
+    expect(document.body).not.toHaveTextContent("internal throttle details");
+  });
+
+  it("keeps verification resend busy while an expired access token is renewed", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveResend;
+    client.login.mockResolvedValue({
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    client.resendEmailVerification
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveResend = resolve;
+      }));
+    client.refreshSession.mockResolvedValue({
+      token: "renewed-token",
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+
+    await waitFor(() => expect(client.resendEmailVerification).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+    expect(client.resendEmailVerification).toHaveBeenNthCalledWith(2, {
+      token: "renewed-token",
+    });
+
+    await act(async () => resolveResend(null));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If verification is still needed, a fresh link will arrive shortly.",
+    );
   });
 
   it("still clears local access when the logout endpoint is unavailable", async () => {

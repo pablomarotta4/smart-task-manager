@@ -1,5 +1,14 @@
-export default function AccountSection({ user, onLogout, loggingOut = false }) {
+export default function AccountSection({
+  user,
+  onLogout,
+  loggingOut = false,
+  onResendVerification,
+  resendingVerification = false,
+  verificationNotice = "",
+  verificationError = "",
+}) {
   const displayName = user.fullName || user.username;
+  const emailVerified = user.emailVerified === true;
 
   return (
     <section className="account-stage" aria-labelledby="account-title">
@@ -40,6 +49,35 @@ export default function AccountSection({ user, onLogout, loggingOut = false }) {
               <dd>Stored in this browser tab</dd>
             </div>
           </dl>
+          <div className="account-verification">
+            <div>
+              <span className={`verification-state ${emailVerified ? "is-verified" : ""}`}>
+                {emailVerified ? "Email verified" : "Verification pending"}
+              </span>
+              <p>
+                {emailVerified
+                  ? "Your email is ready for collaboration and account messages."
+                  : "Verify your email before using collaboration features."}
+              </p>
+            </div>
+            {!emailVerified ? (
+              <button
+                className="text-action"
+                type="button"
+                onClick={onResendVerification}
+                disabled={resendingVerification}
+                aria-busy={resendingVerification}
+              >
+                {resendingVerification ? "Sending…" : "Resend verification email"}
+              </button>
+            ) : null}
+          </div>
+          {verificationNotice ? (
+            <p className="account-inline-result" role="status">{verificationNotice}</p>
+          ) : null}
+          {verificationError ? (
+            <p className="error-banner" role="alert">{verificationError}</p>
+          ) : null}
         </article>
 
         <article className="account-card account-boundary">

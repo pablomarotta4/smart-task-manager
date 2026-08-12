@@ -16,6 +16,18 @@ services:
       timeout: 5s
       retries: 5
 
+  mailpit:
+    image: axllent/mailpit:v1.24
+    container_name: smart_task_manager_mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ollama:
     profiles: ["ai"]
     image: ollama/ollama:latest

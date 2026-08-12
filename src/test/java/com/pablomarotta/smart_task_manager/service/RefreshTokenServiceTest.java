@@ -4,6 +4,7 @@ import com.pablomarotta.smart_task_manager.model.RefreshToken;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.RefreshTokenRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
+import com.pablomarotta.smart_task_manager.security.AuthenticatedUserPrincipal;
 import com.pablomarotta.smart_task_manager.security.RefreshTokenCodec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,12 +13,15 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,7 +68,7 @@ class RefreshTokenServiceTest {
 
     @Test
     void issueForUsernameStoresOnlyTheHashAndReturnsTheOpaqueToken() {
-        when(userRepository.findByUsername("pablo")).thenReturn(Optional.of(activeUser));
+        when(userRepository.findActiveForUpdateByUsername("pablo")).thenReturn(Optional.of(activeUser));
         when(refreshTokenCodec.generate()).thenReturn("raw-refresh-token");
         when(refreshTokenCodec.hash("raw-refresh-token")).thenReturn("stored-digest");
 
@@ -77,14 +81,32 @@ class RefreshTokenServiceTest {
         assertThat(savedToken.getValue().getIssuedAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
         assertThat(savedToken.getValue().getExpiresAt())
                 .isEqualTo(LocalDateTime.ofInstant(NOW.plusMillis(REFRESH_EXPIRATION_MS), ZoneOffset.UTC));
+        assertThat(savedToken.getValue().getFamilyId()).isNotNull();
         assertThat(issued.value()).isEqualTo("raw-refresh-token");
         assertThat(issued.username()).isEqualTo("pablo");
+        assertThat(issued.userId()).isEqualTo(7L);
+        assertThat(issued.authVersion()).isZero();
+    }
+
+    @Test
+    void issueForPrincipalRejectsCredentialsObservedBeforeTheAuthVersionChanged() {
+        AuthenticatedUserPrincipal observedCredentials = principal(0);
+        activeUser.setAuthVersion(1);
+        when(userRepository.findActiveForUpdateById(7L)).thenReturn(Optional.of(activeUser));
+
+        assertThatThrownBy(() -> refreshTokenService.issueForPrincipal(observedCredentials))
+                .isInstanceOf(AuthenticationException.class)
+                .hasMessage("Refresh token is invalid or expired");
+
+        verify(refreshTokenRepository, never()).save(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void rotateRevokesTheClaimedTokenAndIssuesAReplacementForTheSameUser() {
         RefreshToken current = validStoredToken();
         when(refreshTokenCodec.hash("current-token")).thenReturn("current-digest");
+        when(refreshTokenRepository.findUserIdByTokenHash("current-digest")).thenReturn(Optional.of(7L));
+        when(userRepository.findActiveForUpdateById(7L)).thenReturn(Optional.of(activeUser));
         when(refreshTokenRepository.findForUpdateByTokenHash("current-digest"))
                 .thenReturn(Optional.of(current));
         when(refreshTokenCodec.generate()).thenReturn("replacement-token");
@@ -96,15 +118,20 @@ class RefreshTokenServiceTest {
         ArgumentCaptor<RefreshToken> savedTokens = ArgumentCaptor.forClass(RefreshToken.class);
         verify(refreshTokenRepository, org.mockito.Mockito.times(2)).save(savedTokens.capture());
         assertThat(savedTokens.getAllValues().get(1).getTokenHash()).isEqualTo("replacement-digest");
+        assertThat(savedTokens.getAllValues().get(1).getFamilyId()).isEqualTo(current.getFamilyId());
         assertThat(replacement.value()).isEqualTo("replacement-token");
         assertThat(replacement.username()).isEqualTo("pablo");
+        assertThat(replacement.userId()).isEqualTo(7L);
+        assertThat(replacement.authVersion()).isZero();
     }
 
     @Test
-    void rotateRejectsAReplayedRevokedToken() {
+    void rotateRevokesTheEntireFamilyWhenARevokedTokenIsReplayed() {
         RefreshToken revoked = validStoredToken();
         revoked.setRevokedAt(LocalDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC));
         when(refreshTokenCodec.hash("replayed-token")).thenReturn("replayed-digest");
+        when(refreshTokenRepository.findUserIdByTokenHash("replayed-digest")).thenReturn(Optional.of(7L));
+        when(userRepository.findActiveForUpdateById(7L)).thenReturn(Optional.of(activeUser));
         when(refreshTokenRepository.findForUpdateByTokenHash("replayed-digest"))
                 .thenReturn(Optional.of(revoked));
 
@@ -112,7 +139,21 @@ class RefreshTokenServiceTest {
                 .isInstanceOf(AuthenticationException.class)
                 .hasMessage("Refresh token is invalid or expired");
 
+        verify(refreshTokenRepository).revokeFamilyByUserIdAndFamilyId(
+                7L,
+                revoked.getFamilyId(),
+                LocalDateTime.ofInstant(NOW, ZoneOffset.UTC)
+        );
         verify(refreshTokenCodec, never()).generate();
+    }
+
+    @Test
+    void replayContainmentDoesNotRollBackTheFamilyRevocation() throws NoSuchMethodException {
+        Transactional transaction = RefreshTokenService.class
+                .getMethod("rotate", String.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transaction.noRollbackFor()).contains(BadCredentialsException.class);
     }
 
     @Test
@@ -120,6 +161,8 @@ class RefreshTokenServiceTest {
         RefreshToken expired = validStoredToken();
         expired.setExpiresAt(LocalDateTime.ofInstant(NOW.minusSeconds(1), ZoneOffset.UTC));
         when(refreshTokenCodec.hash("expired-token")).thenReturn("expired-digest");
+        when(refreshTokenRepository.findUserIdByTokenHash("expired-digest")).thenReturn(Optional.of(7L));
+        when(userRepository.findActiveForUpdateById(7L)).thenReturn(Optional.of(activeUser));
         when(refreshTokenRepository.findForUpdateByTokenHash("expired-digest"))
                 .thenReturn(Optional.of(expired));
 
@@ -133,23 +176,48 @@ class RefreshTokenServiceTest {
         RefreshToken token = validStoredToken();
         token.getUser().setActive(false);
         when(refreshTokenCodec.hash("inactive-token")).thenReturn("inactive-digest");
-        when(refreshTokenRepository.findForUpdateByTokenHash("inactive-digest"))
-                .thenReturn(Optional.of(token));
+        when(refreshTokenRepository.findUserIdByTokenHash("inactive-digest")).thenReturn(Optional.of(7L));
+        when(userRepository.findActiveForUpdateById(7L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> refreshTokenService.rotate("inactive-token"))
                 .isInstanceOf(AuthenticationException.class)
                 .hasMessage("Refresh token is invalid or expired");
+
+        verify(refreshTokenRepository, never()).findForUpdateByTokenHash("inactive-digest");
     }
 
     @Test
     void revokeIsIdempotentForUnknownTokens() {
         when(refreshTokenCodec.hash("unknown-token")).thenReturn("unknown-digest");
-        when(refreshTokenRepository.findForUpdateByTokenHash("unknown-digest"))
-                .thenReturn(Optional.empty());
+        when(refreshTokenRepository.findUserIdByTokenHash("unknown-digest")).thenReturn(Optional.empty());
 
         refreshTokenService.revoke("unknown-token");
 
         verify(refreshTokenRepository, never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void revokeRevokesTheEntireFamilyForThePresentedToken() {
+        RefreshToken current = validStoredToken();
+        when(refreshTokenCodec.hash("current-token")).thenReturn("current-digest");
+        when(refreshTokenRepository.findUserIdByTokenHash("current-digest")).thenReturn(Optional.of(7L));
+        when(userRepository.findActiveForUpdateById(7L)).thenReturn(Optional.of(activeUser));
+        when(refreshTokenRepository.findForUpdateByTokenHash("current-digest")).thenReturn(Optional.of(current));
+
+        refreshTokenService.revoke("current-token");
+
+        verify(refreshTokenRepository).revokeFamilyByUserIdAndFamilyId(
+                7L,
+                current.getFamilyId(),
+                LocalDateTime.ofInstant(NOW, ZoneOffset.UTC)
+        );
+    }
+
+    @Test
+    void revokeAllForUserIdUsesTheBulkDeleteOperation() {
+        refreshTokenService.revokeAllForUserId(7L);
+
+        verify(refreshTokenRepository).deleteAllByUserId(7L);
     }
 
     private RefreshToken validStoredToken() {
@@ -158,8 +226,20 @@ class RefreshTokenServiceTest {
                 .id(11L)
                 .user(activeUser)
                 .tokenHash("current-digest")
+                .familyId(UUID.fromString("3d7d7cd1-1f90-48ca-bdfb-b7d94491f649"))
                 .issuedAt(now.minusDays(1))
                 .expiresAt(now.plusDays(6))
                 .build();
+    }
+
+    private AuthenticatedUserPrincipal principal(int authVersion) {
+        return new AuthenticatedUserPrincipal(
+                7L,
+                "pablo",
+                "encoded",
+                "USER",
+                authVersion,
+                true
+        );
     }
 }

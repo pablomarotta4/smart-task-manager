@@ -11,6 +11,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -19,10 +21,13 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final RefreshTokenService refreshTokenService;
 
     @Transactional
     public UserResponse createUser(UserRequest userRequest) {
-        if (userRepository.existsByUsername(userRequest.getUsername()) || userRepository.existsByEmail(userRequest.getEmail())) {
+        String normalizedEmail = normalizeEmail(userRequest.getEmail());
+        if (userRepository.existsByUsername(userRequest.getUsername())
+                || userRepository.existsByEmailNormalized(normalizedEmail)) {
             throw new UserDuplicatedException("User already exists with provided username or email");
         }
 
@@ -32,7 +37,8 @@ public class UserService {
 
         User user = User.builder()
                 .username(userRequest.getUsername())
-                .email(userRequest.getEmail())
+                .email(userRequest.getEmail().strip())
+                .emailNormalized(normalizedEmail)
                 .fullName(userRequest.getFullName())
                 .password(passwordEncoder.encode(userRequest.getPassword()))
                 .build();
@@ -50,6 +56,7 @@ public class UserService {
         response.setFullName(user.getFullName());
         response.setRole(user.getRole() != null ? user.getRole().name() : null);
         response.setActive(user.getActive());
+        response.setEmailVerified(user.getVerifiedAt() != null);
         response.setCreatedAt(user.getCreatedAt() != null ? user.getCreatedAt().toString() : null);
         response.setUpdatedAt(user.getUpdatedAt() != null ? user.getUpdatedAt().toString() : null);
         return response;
@@ -69,36 +76,48 @@ public class UserService {
 
     @Transactional
     public UserResponse updateUser(String username, UserRequest userRequest) {
-        User user = userRepository.findByUsername(username)
+        boolean passwordChanged = userRequest.getPassword() != null && !userRequest.getPassword().isBlank();
+        User user = userRepository.findActiveForUpdateByUsername(username)
                 .orElseThrow(() -> new UserNotFoundException("User not found with username: " + username));
 
-        if (!user.getUsername().equals(userRequest.getUsername()) &&
-            userRepository.existsByUsername(userRequest.getUsername())) {
-            throw new UserDuplicatedException("Username already exists: " + userRequest.getUsername());
+        if (!Objects.equals(user.getUsername(), userRequest.getUsername())) {
+            throw new IllegalArgumentException("Username cannot be changed");
         }
 
-        if (!user.getEmail().equals(userRequest.getEmail()) &&
-            userRepository.existsByEmail(userRequest.getEmail())) {
-            throw new UserDuplicatedException("Email already exists: " + userRequest.getEmail());
+        if (!Objects.equals(user.getEmail(), userRequest.getEmail())) {
+            throw new IllegalArgumentException("Email cannot be changed");
         }
 
-        user.setUsername(userRequest.getUsername());
-        user.setEmail(userRequest.getEmail());
         user.setFullName(userRequest.getFullName());
-        if (userRequest.getPassword() != null && !userRequest.getPassword().isEmpty()) {
+        if (passwordChanged) {
             user.setPassword(passwordEncoder.encode(userRequest.getPassword()));
+            incrementAuthVersion(user);
         }
 
         User updatedUser = userRepository.save(user);
+        if (passwordChanged) {
+            refreshTokenService.revokeAllForUserId(user.getId());
+        }
         return mapToResponse(updatedUser);
     }
 
     @Transactional
     public void deleteUser(String username) {
-        User user = userRepository.findByUsername(username)
+        User user = userRepository.findActiveForUpdateByUsername(username)
                 .orElseThrow(() -> new UserNotFoundException("User not found with username: " + username));
 
         user.setActive(false);
+        incrementAuthVersion(user);
         userRepository.save(user);
+        refreshTokenService.revokeAllForUserId(user.getId());
+    }
+
+    private String normalizeEmail(String email) {
+        return email.strip().toLowerCase(Locale.ROOT);
+    }
+
+    private void incrementAuthVersion(User user) {
+        int authVersion = user.getAuthVersion() == null ? 0 : user.getAuthVersion();
+        user.setAuthVersion(authVersion + 1);
     }
 }

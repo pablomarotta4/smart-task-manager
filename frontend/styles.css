@@ -355,6 +355,71 @@ h3 {
   font-size: 0.64rem;
 }
 
+.forgot-password-action {
+  margin-top: 1rem;
+  border-color: #d7d3c8;
+  color: #d7d3c8;
+}
+
+.account-action-shell {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: clamp(1.2rem, 5vw, 4rem);
+  background:
+    linear-gradient(135deg, transparent 0 68%, rgba(224, 75, 50, 0.16) 68% 82%, transparent 82%),
+    var(--paper);
+}
+
+.account-action-card {
+  width: min(100%, 600px);
+  border: 1px solid var(--ink);
+  background: var(--paper-bright);
+  padding: clamp(1.5rem, 6vw, 4rem);
+  box-shadow: var(--shadow);
+  animation: reveal-up 420ms ease both;
+}
+
+.account-action-card .section-index {
+  margin-top: 2rem;
+}
+
+.account-action-card .status-chip {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
+.account-action-card h1 {
+  margin-bottom: 1.2rem;
+  font-size: clamp(3.2rem, 8vw, 6rem);
+  letter-spacing: -0.055em;
+}
+
+.account-action-card .primary-action {
+  width: 100%;
+}
+
+.account-action-result {
+  margin: 2rem 0 0;
+  border: 1px solid var(--olive);
+  background: rgba(95, 111, 69, 0.1);
+  color: var(--olive);
+  padding: 1rem;
+  line-height: 1.6;
+}
+
+.account-action-return {
+  margin-top: 1.5rem;
+}
+
+.account-action-loading {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .primary-action {
   display: inline-flex;
   min-height: 3.35rem;
@@ -2825,6 +2890,45 @@ h3 {
   font-size: 0.75rem;
 }
 
+.account-verification {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  margin-top: 1.2rem;
+}
+
+.account-verification p {
+  margin: 0.45rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+
+.verification-state {
+  color: var(--warning);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.verification-state.is-verified {
+  color: var(--olive);
+}
+
+.account-inline-result {
+  margin: 1rem 0 0;
+  border-left: 3px solid var(--olive);
+  color: var(--olive);
+  padding: 0.65rem 0.8rem;
+  font-size: 0.72rem;
+}
+
+.account-details .error-banner {
+  font-size: 0.72rem;
+}
+
 .account-boundary h2 {
   margin-bottom: 0.8rem;
   font-size: clamp(2rem, 4vw, 3.5rem);
@@ -3310,6 +3414,11 @@ h3 {
 
   .account-details dl {
     grid-template-columns: 1fr;
+  }
+
+  .account-verification {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

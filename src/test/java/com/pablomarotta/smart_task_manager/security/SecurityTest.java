@@ -14,8 +14,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Collections;
@@ -71,13 +69,10 @@ class SecurityTest {
 
     @Test
     void protectedEndpoint_WithValidToken_ShouldReturnOk() throws Exception {
-        UserDetails userDetails = User.withUsername("testuser")
-                .password("password")
-                .authorities(Collections.emptyList())
-                .build();
+        AuthenticatedUserPrincipal userDetails = principal("testuser", "USER", 1L, 0, true);
 
-        when(jwtTokenProvider.validateToken("valid-token")).thenReturn(true);
-        when(jwtTokenProvider.getUsernameFromToken("valid-token")).thenReturn("testuser");
+        when(jwtTokenProvider.parseAccessToken("valid-token"))
+                .thenReturn(new JwtTokenProvider.AccessTokenClaims("testuser", 1L, 0));
         when(userDetailsService.loadUserByUsername("testuser")).thenReturn(userDetails);
         when(taskService.getAllTasks("testuser")).thenReturn(Collections.emptyList());
 
@@ -88,18 +83,42 @@ class SecurityTest {
 
     @Test
     void protectedEndpoint_WithInactiveAccountToken_ShouldReturnUnauthorized() throws Exception {
-        UserDetails userDetails = User.withUsername("inactive")
-                .password("password")
-                .authorities("ROLE_USER")
-                .disabled(true)
-                .build();
+        AuthenticatedUserPrincipal userDetails = principal("inactive", "USER", 2L, 0, false);
 
-        when(jwtTokenProvider.validateToken("inactive-token")).thenReturn(true);
-        when(jwtTokenProvider.getUsernameFromToken("inactive-token")).thenReturn("inactive");
+        when(jwtTokenProvider.parseAccessToken("inactive-token"))
+                .thenReturn(new JwtTokenProvider.AccessTokenClaims("inactive", 2L, 0));
         when(userDetailsService.loadUserByUsername("inactive")).thenReturn(userDetails);
 
         mockMvc.perform(get("/api/tasks/alltasks")
                         .header("Authorization", "Bearer inactive-token"))
+                .andExpect(status().isUnauthorized());
+
+        verify(taskService, never()).getAllTasks(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void protectedEndpoint_WithUserIdMismatch_ShouldReturnUnauthorized() throws Exception {
+        when(jwtTokenProvider.parseAccessToken("wrong-uid-token"))
+                .thenReturn(new JwtTokenProvider.AccessTokenClaims("alice", 1L, 0));
+        when(userDetailsService.loadUserByUsername("alice"))
+                .thenReturn(principal("alice", "USER", 2L, 0, true));
+
+        mockMvc.perform(get("/api/tasks/alltasks")
+                        .header("Authorization", "Bearer wrong-uid-token"))
+                .andExpect(status().isUnauthorized());
+
+        verify(taskService, never()).getAllTasks(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void protectedEndpoint_WithSubjectUsernameMismatch_ShouldReturnUnauthorized() throws Exception {
+        when(jwtTokenProvider.parseAccessToken("wrong-subject-token"))
+                .thenReturn(new JwtTokenProvider.AccessTokenClaims("alice", 1L, 0));
+        when(userDetailsService.loadUserByUsername("alice"))
+                .thenReturn(principal("bob", "USER", 1L, 0, true));
+
+        mockMvc.perform(get("/api/tasks/alltasks")
+                        .header("Authorization", "Bearer wrong-subject-token"))
                 .andExpect(status().isUnauthorized());
 
         verify(taskService, never()).getAllTasks(org.mockito.ArgumentMatchers.anyString());
@@ -202,13 +221,27 @@ class SecurityTest {
     }
 
     private void authenticate(String token, String username, String authority) {
-        UserDetails userDetails = User.withUsername(username)
-                .password("password")
-                .authorities(authority)
-                .build();
-        when(jwtTokenProvider.validateToken(token)).thenReturn(true);
-        when(jwtTokenProvider.getUsernameFromToken(token)).thenReturn(username);
+        AuthenticatedUserPrincipal userDetails = principal(username, authority.replace("ROLE_", ""), 1L, 0, true);
+        when(jwtTokenProvider.parseAccessToken(token))
+                .thenReturn(new JwtTokenProvider.AccessTokenClaims(username, 1L, 0));
         when(userDetailsService.loadUserByUsername(username)).thenReturn(userDetails);
+    }
+
+    private AuthenticatedUserPrincipal principal(
+            String username,
+            String role,
+            Long userId,
+            int authVersion,
+            boolean active
+    ) {
+        return new AuthenticatedUserPrincipal(
+                userId,
+                username,
+                "password",
+                role,
+                authVersion,
+                active
+        );
     }
 
     private UserRequest validUserRequest(String username) {

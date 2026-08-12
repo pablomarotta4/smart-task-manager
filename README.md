@@ -40,11 +40,16 @@ does not force a clarification interview before showing useful work.
 
 Requirements: Java 21, Maven, Docker, Node.js, Python 3.12+, and `uv`.
 
-Start PostgreSQL:
+Start PostgreSQL and the local Mailpit inbox:
 
 ```bash
-docker compose up -d postgres
+docker compose up -d postgres mailpit
 ```
+
+Spring's local mail defaults send to Mailpit on `localhost:1025`; open
+`http://localhost:8025` to inspect account-verification and password-reset emails. The delivery link
+contains the short-lived action token only in the email body (as a URL fragment), never in the database
+or application logs. Set `EMAIL_LINK_BASE_URL` when the frontend is not at `http://localhost:3000`.
 
 Run Ollama and the AI service either through Compose:
 
@@ -76,7 +81,7 @@ uv run uvicorn smart_task_ai.main:app --port 8000
 Then run Spring with Java 21:
 
 ```bash
-mvn spring-boot:run
+SPRING_PROFILES_ACTIVE=local mvn spring-boot:run
 ```
 
 Finally, start the project workshop from the repository root:
@@ -118,14 +123,43 @@ Useful configuration:
 - `JWT_EXPIRATION_MS` defaults to `900000` (15 minutes).
 - `JWT_REFRESH_EXPIRATION_MS` defaults to `604800000` (7 days).
 - `CORS_ALLOWED_ORIGINS` defaults to the local Vite origins on `localhost` and `127.0.0.1`.
+- The base Spring profile deliberately has no JWT or account-action signing-secret fallback. Use the `local` profile for the committed disposable local-only secrets, or supply `JWT_SECRET` and `ACCOUNT_ACTION_TOKEN_SECRET` explicitly.
+- `AUTH_RATE_LIMIT_TRUSTED_PROXIES` is a comma-separated allowlist of reverse-proxy IPs/CIDRs. An empty value means forwarded client-IP headers are ignored. Never trust a forwarded header unless its immediate peer is listed.
+- `EMAIL_OUTBOX_ENABLED` defaults to `true`; local SMTP defaults to Mailpit at `localhost:1025`.
+- `EMAIL_LINK_BASE_URL` defaults to `http://localhost:3000`; `EMAIL_FROM_ADDRESS` defaults to
+  `no-reply@smart-task-manager.local`.
 
-For a production-profile deployment, set a unique `JWT_SECRET` of at least 32 bytes and an explicit
-comma-separated `CORS_ALLOWED_ORIGINS`. `application-prod.yaml` has no secret or origin fallback and
-forces secure refresh cookies:
+For a production-profile deployment, set distinct access-token and account-action secrets of at least
+32 bytes, explicit issuer/audience values for both token types, a comma-separated
+`CORS_ALLOWED_ORIGINS`, and an explicit auth rate-limit enforcement mode. `application-prod.yaml`
+has no fallback for these values and forces secure refresh cookies.
+
+Choose one rate-limit contract:
+
+- `edge-enforced` is for multi-instance deployments. It requires a nonblank
+  `AUTH_RATE_LIMIT_TRUSTED_PROXIES` allowlist and means the ingress/edge must enforce the global
+  limit; the in-process limiter remains a per-JVM safeguard.
+- `single-instance` is only for exactly one application instance with no horizontal scaling. It
+  requires `AUTH_RATE_LIMIT_SINGLE_INSTANCE_ACKNOWLEDGED=true`; an empty trusted-proxy list is
+  appropriate only when the application receives direct client traffic.
+
+Example for an edge-enforced production deployment:
 
 ```bash
 SPRING_PROFILES_ACTIVE=prod \
 JWT_SECRET='replace-with-at-least-32-random-bytes' \
+JWT_ISSUER='smart-task-manager-access' \
+JWT_AUDIENCE='smart-task-manager-api' \
+ACCOUNT_ACTION_TOKEN_SECRET='replace-with-a-different-32-byte-random-secret' \
+ACCOUNT_ACTION_TOKEN_ISSUER='smart-task-manager-account-action' \
+ACCOUNT_ACTION_TOKEN_AUDIENCE='smart-task-manager-account-action' \
+AUTH_RATE_LIMIT_ENFORCEMENT_MODE='edge-enforced' \
+AUTH_RATE_LIMIT_TRUSTED_PROXIES='192.0.2.10,2001:db8::/32' \
+MAIL_HOST='smtp.example.com' \
+MAIL_USERNAME='smtp-user' \
+MAIL_PASSWORD='smtp-password' \
+EMAIL_LINK_BASE_URL='https://tasks.example.com' \
+EMAIL_FROM_ADDRESS='no-reply@example.com' \
 CORS_ALLOWED_ORIGINS='https://tasks.example.com' \
 java -jar target/smart-task-manager-0.0.1-SNAPSHOT.jar
 ```

@@ -2,13 +2,38 @@ const DEFAULT_API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
 export class ApiError extends Error {
-  constructor(message, { status, details } = {}) {
+  constructor(message, {
+    status,
+    details,
+    code,
+    retryAfterSeconds,
+    retryable = status === undefined || status === 408 || status === 425
+      || status === 429 || status >= 500,
+  } = {}) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.details = details;
+    this.code = code;
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.retryable = retryable;
   }
 }
+
+const STABLE_ERROR_CODES = new Set([
+  "ACCOUNT_ACTION_INVALID",
+  "ACCOUNT_ACTION_EXPIRED",
+  "ACCOUNT_ACTION_USED",
+  "ACCOUNT_ACTION_SUPERSEDED",
+]);
+
+const parseRetryAfterSeconds = (response) => {
+  const value = response.headers.get("retry-after");
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  const seconds = Number(value);
+  if (!Number.isSafeInteger(seconds) || seconds <= 0) return undefined;
+  return Math.min(seconds, 86_400);
+};
 
 const parseResponse = async (response) => {
   const contentType = response.headers.get("content-type") ?? "";
@@ -40,6 +65,7 @@ export const createApiClient = ({
     } catch (error) {
       throw new ApiError("Cannot reach the Smart Task Manager API", {
         details: error instanceof Error ? error.message : String(error),
+        retryable: true,
       });
     }
 
@@ -50,6 +76,8 @@ export const createApiClient = ({
         {
           status: response.status,
           details: payload?.details,
+          code: STABLE_ERROR_CODES.has(payload?.code) ? payload.code : undefined,
+          retryAfterSeconds: parseRetryAfterSeconds(response),
         },
       );
     }
@@ -62,6 +90,14 @@ export const createApiClient = ({
     getCurrentUser: ({ token }) => request("/api/auth/me", { method: "GET", token }),
     refreshSession: () => request("/api/auth/refresh"),
     logout: () => request("/api/auth/logout"),
+    requestPasswordReset: ({ email }) =>
+      request("/api/auth/password-reset/request", { body: { email } }),
+    confirmPasswordReset: ({ token, password }) =>
+      request("/api/auth/password-reset/confirm", { body: { token, password } }),
+    confirmEmailVerification: ({ token }) =>
+      request("/api/auth/email-verification/confirm", { body: { token } }),
+    resendEmailVerification: ({ token }) =>
+      request("/api/auth/email-verification/resend", { token }),
     generateProject: ({ token, prompt }) =>
       request("/api/project-generation-runs", { token, body: { prompt } }),
     generateTaskPlan: ({ token, projectId, taskId, prompt }) =>

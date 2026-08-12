@@ -20,6 +20,10 @@ class FlywayMigrationIntegrationTest extends PostgresIntegrationTest {
 
     private static final String EMPTY_DATABASE_SCHEMA = "flyway_empty_database_test";
     private static final String SEQUENTIAL_UPGRADE_SCHEMA = "flyway_sequential_upgrade_test";
+    private static final String ACCOUNT_ACTION_SCHEMA = "flyway_account_action_test";
+    private static final String NORMALIZED_EMAIL_COLLISION_SCHEMA = "flyway_normalized_email_collision_test";
+    private static final String OUTBOX_STATE_SCHEMA = "flyway_outbox_state_test";
+    private static final String REFRESH_TOKEN_FAMILY_SCHEMA = "flyway_refresh_token_family_test";
 
     @Autowired
     FlywayMigrationIntegrationTest(DataSource dataSource) {
@@ -32,7 +36,7 @@ class FlywayMigrationIntegrationTest extends PostgresIntegrationTest {
 
         flyway.clean();
         List<String> migrationVersions = availableMigrationVersions(flyway);
-        assertThat(migrationVersions).contains("8");
+        assertThat(migrationVersions).contains("9");
         MigrateResult migrationResult = flyway.migrate();
 
         assertThat(migrationResult.success).isTrue();
@@ -214,6 +218,292 @@ class FlywayMigrationIntegrationTest extends PostgresIntegrationTest {
         }
     }
 
+    @Test
+    void versionNineBackfillsAStableFamilyForLegacyRefreshTokens() throws Exception {
+        Flyway legacyFlyway = migrationFlyway(REFRESH_TOKEN_FAMILY_SCHEMA, "8");
+        legacyFlyway.clean();
+        legacyFlyway.migrate();
+
+        try (Connection connection = schemaConnection(REFRESH_TOKEN_FAMILY_SCHEMA);
+             java.sql.Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO users (username, email, password, full_name, active, role)
+                    VALUES ('v9-refresh-family', 'v9-refresh-family@example.com', 'encoded', 'V9 Refresh Family', true, 'USER')
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO refresh_tokens (user_id, token_hash, issued_at, expires_at)
+                    SELECT id, repeat('f', 64), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '7 days'
+                    FROM users
+                    WHERE username = 'v9-refresh-family'
+                    """);
+
+            Flyway migrationFlyway = migrationFlyway(REFRESH_TOKEN_FAMILY_SCHEMA, null);
+            assertThat(migrationFlyway.migrate().success).isTrue();
+
+            java.sql.ResultSet refreshToken = statement.executeQuery("""
+                    SELECT family_id
+                    FROM refresh_tokens
+                    WHERE token_hash = repeat('f', 64)
+                    """);
+            refreshToken.next();
+            assertThat(refreshToken.getObject("family_id")).isInstanceOf(java.util.UUID.class);
+
+            java.sql.ResultSet familyColumn = statement.executeQuery("""
+                    SELECT is_nullable, data_type
+                    FROM information_schema.columns
+                    WHERE table_schema = 'flyway_refresh_token_family_test'
+                      AND table_name = 'refresh_tokens'
+                      AND column_name = 'family_id'
+                    """);
+            familyColumn.next();
+            assertThat(familyColumn.getString("is_nullable")).isEqualTo("NO");
+            assertThat(familyColumn.getString("data_type")).isEqualTo("uuid");
+        }
+    }
+
+    @Test
+    void versionNineBackfillsLegacyAuthenticationFieldsAndProtectsIdentityInvariants() throws Exception {
+        Flyway legacyFlyway = migrationFlyway(ACCOUNT_ACTION_SCHEMA, "8");
+        legacyFlyway.clean();
+        legacyFlyway.migrate();
+
+        try (Connection connection = schemaConnection(ACCOUNT_ACTION_SCHEMA);
+             java.sql.Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO users (username, email, password, full_name, active, role)
+                    VALUES ('v9-user', ' Legacy.User@Example.COM ', 'encoded', 'V9 User', true, 'USER')
+                    """);
+
+            Flyway migrationFlyway = migrationFlyway(ACCOUNT_ACTION_SCHEMA, null);
+            MigrateResult migrationResult = migrationFlyway.migrate();
+
+            assertThat(migrationResult.success).isTrue();
+            assertThat(appliedMigrationVersions(migrationFlyway)).contains("9");
+
+            java.sql.ResultSet user = statement.executeQuery("""
+                    SELECT email_normalized, verified_at, auth_version
+                    FROM users
+                    WHERE username = 'v9-user'
+                    """);
+            user.next();
+            assertThat(user.getString("email_normalized")).isEqualTo("legacy.user@example.com");
+            assertThat(user.getObject("verified_at")).isNotNull();
+            assertThat(user.getInt("auth_version")).isZero();
+
+            java.sql.ResultSet userUniqueConstraints = statement.executeQuery("""
+                    SELECT constraint_name
+                    FROM information_schema.table_constraints
+                    WHERE table_schema = 'flyway_account_action_test'
+                      AND table_name = 'users'
+                      AND constraint_type = 'UNIQUE'
+                    """);
+            java.util.List<String> uniqueConstraintNames = new java.util.ArrayList<>();
+            while (userUniqueConstraints.next()) {
+                uniqueConstraintNames.add(userUniqueConstraints.getString("constraint_name"));
+            }
+            assertThat(uniqueConstraintNames)
+                    .contains("uq_users_email_normalized")
+                    .doesNotContain("users_email_key");
+
+            statement.executeUpdate("""
+                    INSERT INTO users (username, email, email_normalized, password, full_name, active, role, verified_at)
+                    VALUES ('v9-distinct-email', ' Another.User@Example.COM ', 'another.user@example.com', 'encoded', 'Distinct Email', true, 'USER', CURRENT_TIMESTAMP)
+                    """);
+
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    INSERT INTO users (username, email, email_normalized, password, full_name, active, role, verified_at)
+                    VALUES ('v9-duplicate', 'LEGACY.USER@example.com', 'legacy.user@example.com', 'encoded', 'Duplicate', true, 'USER', CURRENT_TIMESTAMP)
+                    """))).isNotNull();
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    UPDATE users
+                    SET email = ' needs-normalization@example.com '
+                    WHERE username = 'v9-user'
+                    """))).isNotNull();
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    UPDATE users
+                    SET username = 'v9-user-renamed'
+                    WHERE username = 'v9-user'
+                    """))).isNotNull();
+
+            statement.executeUpdate("""
+                    INSERT INTO account_action_requests (
+                        id, user_id, purpose, state, token_hash, token_version, issued_at, expires_at
+                    )
+                    SELECT
+                        '00000000-0000-0000-0000-000000000091'::uuid,
+                        id,
+                        'VERIFY_EMAIL',
+                        'PENDING',
+                        repeat('a', 64),
+                        1,
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP + INTERVAL '30 minutes'
+                    FROM users
+                    WHERE username = 'v9-user'
+                    """);
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    INSERT INTO account_action_requests (
+                        id, user_id, purpose, state, token_hash, token_version, issued_at, expires_at
+                    )
+                    SELECT
+                        '00000000-0000-0000-0000-000000000093'::uuid,
+                        id,
+                        'VERIFY_EMAIL',
+                        'PENDING',
+                        repeat('b', 64),
+                        1,
+                        CURRENT_TIMESTAMP,
+                        CURRENT_TIMESTAMP + INTERVAL '30 minutes'
+                    FROM users
+                    WHERE username = 'v9-user'
+                    """))).isNotNull();
+            statement.executeUpdate("""
+                    INSERT INTO users (username, email, email_normalized, password, full_name, active, role, verified_at)
+                    VALUES ('v9-other-user', 'v9-other@example.com', 'v9-other@example.com', 'encoded', 'V9 Other', true, 'USER', CURRENT_TIMESTAMP)
+                    """);
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    INSERT INTO email_outbox (
+                        id, recipient_user_id, account_action_request_id, kind, purpose, state, attempts, available_at
+                    )
+                    SELECT
+                        '00000000-0000-0000-0000-000000000092'::uuid,
+                        other_user.id,
+                        '00000000-0000-0000-0000-000000000091'::uuid,
+                        'ACCOUNT_ACTION',
+                        'VERIFY_EMAIL',
+                        'PENDING',
+                        0,
+                        CURRENT_TIMESTAMP
+                    FROM users other_user
+                    WHERE other_user.username = 'v9-other-user'
+                    """))).isNotNull();
+        }
+    }
+
+    @Test
+    void versionNineRejectsNormalizedEmailCollisionsWithoutApplyingPartialSchemaChanges() throws Exception {
+        Flyway legacyFlyway = migrationFlyway(NORMALIZED_EMAIL_COLLISION_SCHEMA, "8");
+        legacyFlyway.clean();
+        legacyFlyway.migrate();
+
+        try (Connection connection = schemaConnection(NORMALIZED_EMAIL_COLLISION_SCHEMA);
+             java.sql.Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO users (username, email, password, full_name, active, role)
+                    VALUES ('v9-collision-one', 'collision@example.com', 'encoded', 'Collision One', true, 'USER'),
+                           ('v9-collision-two', ' COLLISION@example.com ', 'encoded', 'Collision Two', true, 'USER')
+                    """);
+
+            Flyway migrationFlyway = migrationFlyway(NORMALIZED_EMAIL_COLLISION_SCHEMA, null);
+
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(migrationFlyway::migrate)).isNotNull();
+            assertThat(appliedMigrationVersions(migrationFlyway)).doesNotContain("9");
+
+            java.sql.ResultSet emailNormalizedColumn = statement.executeQuery("""
+                    SELECT count(*)
+                    FROM information_schema.columns
+                    WHERE table_schema = 'flyway_normalized_email_collision_test'
+                      AND table_name = 'users'
+                      AND column_name = 'email_normalized'
+                    """);
+            emailNormalizedColumn.next();
+            assertThat(emailNormalizedColumn.getInt(1)).isZero();
+        }
+    }
+
+    @Test
+    void versionNineEnforcesOutboxStateTimestampsAndErrorMetadata() throws Exception {
+        Flyway flyway = migrationFlyway(OUTBOX_STATE_SCHEMA, null);
+        flyway.clean();
+        flyway.migrate();
+
+        try (Connection connection = schemaConnection(OUTBOX_STATE_SCHEMA);
+             java.sql.Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    INSERT INTO users (username, email, email_normalized, password, full_name, active, role, verified_at)
+                    VALUES ('v9-outbox-user', 'v9-outbox@example.com', 'v9-outbox@example.com', 'encoded', 'V9 Outbox', true, 'USER', CURRENT_TIMESTAMP)
+                    """);
+            statement.executeUpdate("""
+                    INSERT INTO account_action_requests (
+                        id, user_id, purpose, state, token_hash, token_version, issued_at, expires_at, consumed_at
+                    )
+                    SELECT action.id::uuid, user_account.id, 'VERIFY_EMAIL', 'CONSUMED', action.token_hash,
+                           1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '30 minutes', CURRENT_TIMESTAMP
+                    FROM users user_account
+                    CROSS JOIN (
+                        VALUES
+                            ('00000000-0000-0000-0000-000000000101', repeat('a', 64)),
+                            ('00000000-0000-0000-0000-000000000102', repeat('b', 64)),
+                            ('00000000-0000-0000-0000-000000000103', repeat('c', 64)),
+                            ('00000000-0000-0000-0000-000000000104', repeat('d', 64)),
+                            ('00000000-0000-0000-0000-000000000105', repeat('e', 64)),
+                            ('00000000-0000-0000-0000-000000000106', repeat('f', 64))
+                    ) action(id, token_hash)
+                    WHERE user_account.username = 'v9-outbox-user'
+                    """);
+
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    INSERT INTO email_outbox (
+                        id, recipient_user_id, account_action_request_id, kind, purpose, state, attempts,
+                        available_at, claimed_at
+                    )
+                    SELECT '00000000-0000-0000-0000-000000000201'::uuid, id,
+                           '00000000-0000-0000-0000-000000000101'::uuid, 'ACCOUNT_ACTION', 'VERIFY_EMAIL',
+                           'PENDING', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    FROM users WHERE username = 'v9-outbox-user'
+                    """))).isNotNull();
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    INSERT INTO email_outbox (
+                        id, recipient_user_id, account_action_request_id, kind, purpose, state, attempts, available_at
+                    )
+                    SELECT '00000000-0000-0000-0000-000000000202'::uuid, id,
+                           '00000000-0000-0000-0000-000000000102'::uuid, 'ACCOUNT_ACTION', 'VERIFY_EMAIL',
+                           'PROCESSING', 0, CURRENT_TIMESTAMP
+                    FROM users WHERE username = 'v9-outbox-user'
+                    """))).isNotNull();
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    INSERT INTO email_outbox (
+                        id, recipient_user_id, account_action_request_id, kind, purpose, state, attempts,
+                        available_at, claimed_at
+                    )
+                    SELECT '00000000-0000-0000-0000-000000000203'::uuid, id,
+                           '00000000-0000-0000-0000-000000000103'::uuid, 'ACCOUNT_ACTION', 'VERIFY_EMAIL',
+                           'SENT', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    FROM users WHERE username = 'v9-outbox-user'
+                    """))).isNotNull();
+            assertThat(org.assertj.core.api.Assertions.catchThrowable(() -> statement.executeUpdate("""
+                    INSERT INTO email_outbox (
+                        id, recipient_user_id, account_action_request_id, kind, purpose, state, attempts, available_at
+                    )
+                    SELECT '00000000-0000-0000-0000-000000000204'::uuid, id,
+                           '00000000-0000-0000-0000-000000000104'::uuid, 'ACCOUNT_ACTION', 'VERIFY_EMAIL',
+                           'DEAD', 0, CURRENT_TIMESTAMP
+                    FROM users WHERE username = 'v9-outbox-user'
+                    """))).isNotNull();
+
+            assertThat(statement.executeUpdate("""
+                    INSERT INTO email_outbox (
+                        id, recipient_user_id, account_action_request_id, kind, purpose, state, attempts,
+                        available_at, claimed_at, sent_at
+                    )
+                    SELECT '00000000-0000-0000-0000-000000000205'::uuid, id,
+                           '00000000-0000-0000-0000-000000000105'::uuid, 'ACCOUNT_ACTION', 'VERIFY_EMAIL',
+                           'SENT', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    FROM users WHERE username = 'v9-outbox-user'
+                    """)).isEqualTo(1);
+            assertThat(statement.executeUpdate("""
+                    INSERT INTO email_outbox (
+                        id, recipient_user_id, account_action_request_id, kind, purpose, state, attempts,
+                        available_at, last_error_code
+                    )
+                    SELECT '00000000-0000-0000-0000-000000000206'::uuid, id,
+                           '00000000-0000-0000-0000-000000000106'::uuid, 'ACCOUNT_ACTION', 'VERIFY_EMAIL',
+                           'DEAD', 1, CURRENT_TIMESTAMP, 'DELIVERY_RETRY_EXHAUSTED'
+                    FROM users WHERE username = 'v9-outbox-user'
+                    """)).isEqualTo(1);
+        }
+    }
+
     private Flyway migrationFlyway(String schema, String targetMigrationVersion) {
         org.flywaydb.core.api.configuration.FluentConfiguration configuration = Flyway.configure()
                 .dataSource(
@@ -230,6 +520,16 @@ class FlywayMigrationIntegrationTest extends PostgresIntegrationTest {
             configuration.target(targetMigrationVersion);
         }
         return configuration.load();
+    }
+
+    private Connection schemaConnection(String schema) throws java.sql.SQLException {
+        Connection connection = DriverManager.getConnection(
+                POSTGRESQL.getJdbcUrl(),
+                POSTGRESQL.getUsername(),
+                POSTGRESQL.getPassword()
+        );
+        connection.setSchema(schema);
+        return connection;
     }
 
     private List<String> availableMigrationVersions(Flyway flyway) {
