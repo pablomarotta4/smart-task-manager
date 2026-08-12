@@ -4,12 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Project;
+import com.pablomarotta.smart_task_manager.model.ProjectMembership;
+import com.pablomarotta.smart_task_manager.model.ProjectRole;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.model.TaskAcceptanceCriterion;
 import com.pablomarotta.smart_task_manager.model.TaskDependency;
 import com.pablomarotta.smart_task_manager.model.User;
-import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
@@ -20,7 +21,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -33,13 +33,13 @@ import static org.mockito.Mockito.when;
 class ProjectPlanningContextServiceTest {
 
     @Mock
-    private ProjectRepository projectRepository;
-    @Mock
     private TaskRepository taskRepository;
     @Mock
     private TaskAcceptanceCriterionRepository criterionRepository;
     @Mock
     private TaskDependencyRepository dependencyRepository;
+    @Mock
+    private ProjectAccessPolicy accessPolicy;
 
     private ProjectPlanningContextService service;
     private Project project;
@@ -49,11 +49,11 @@ class ProjectPlanningContextServiceTest {
     @BeforeEach
     void setUp() {
         service = new ProjectPlanningContextService(
-                projectRepository,
                 taskRepository,
                 criterionRepository,
                 dependencyRepository,
-                new ObjectMapper().findAndRegisterModules()
+                new ObjectMapper().findAndRegisterModules(),
+                accessPolicy
         );
         User owner = User.builder().id(7L).username("alice").active(true).build();
         project = Project.builder()
@@ -128,8 +128,8 @@ class ProjectPlanningContextServiceTest {
 
     @Test
     void rejectsForeignProjectBeforeLoadingItsTasks() {
-        when(projectRepository.findByIdAndOwnerUsername(20L, "mallory"))
-                .thenReturn(Optional.empty());
+        when(accessPolicy.requireManager(20L, "mallory"))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 20"));
 
         assertThrows(
                 ProjectNotFoundException.class,
@@ -143,8 +143,12 @@ class ProjectPlanningContextServiceTest {
             List<TaskAcceptanceCriterion> criteria,
             List<TaskDependency> dependencies
     ) {
-        when(projectRepository.findByIdAndOwnerUsername(20L, "alice"))
-                .thenReturn(Optional.of(project));
+        when(accessPolicy.requireManager(20L, "alice"))
+                .thenReturn(ProjectMembership.builder()
+                        .project(project)
+                        .user(project.getOwner())
+                        .role(ProjectRole.OWNER)
+                        .build());
         when(taskRepository.findByProjectIdOrderByPositionAsc(20L))
                 .thenReturn(List.of(selected, existing));
         when(criterionRepository.findByProjectId(20L)).thenReturn(criteria);

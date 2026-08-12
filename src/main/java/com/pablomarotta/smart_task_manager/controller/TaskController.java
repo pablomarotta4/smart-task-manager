@@ -2,7 +2,7 @@ package com.pablomarotta.smart_task_manager.controller;
 
 import com.pablomarotta.smart_task_manager.dto.TaskRequest;
 import com.pablomarotta.smart_task_manager.dto.TaskResponse;
-import com.pablomarotta.smart_task_manager.dto.UserResponse;
+import com.pablomarotta.smart_task_manager.dto.ProjectMemberUserResponse;
 import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.service.TaskService;
@@ -84,7 +84,7 @@ public class TaskController {
     }
 
     @GetMapping("/project/{projectId}/users")
-    public List<UserResponse> getAllUsersInProject(@PathVariable Long projectId, Principal principal) {
+    public List<ProjectMemberUserResponse> getAllUsersInProject(@PathVariable Long projectId, Principal principal) {
         log.info("Fetching all users in project: {}", projectId);
         return taskService.getAllUsersInProject(projectId, principal.getName());
     }

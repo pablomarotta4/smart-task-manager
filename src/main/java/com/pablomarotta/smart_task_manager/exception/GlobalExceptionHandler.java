@@ -2,6 +2,7 @@ package com.pablomarotta.smart_task_manager.exception;
 
 import com.pablomarotta.smart_task_manager.dto.ErrorDetails;
 import com.pablomarotta.smart_task_manager.client.AIPlanningUnavailableException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -56,6 +57,20 @@ public class GlobalExceptionHandler {
                 ex.getMessage(),
                 request.getDescription(false),
                 HttpStatus.BAD_REQUEST.value()
+        );
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ErrorDetails handleDataIntegrityViolationException(
+            DataIntegrityViolationException ex,
+            WebRequest request
+    ) {
+        return new ErrorDetails(
+                LocalDateTime.now(),
+                "Request conflicts with current resource state",
+                request.getDescription(false),
+                HttpStatus.CONFLICT.value()
         );
     }
 

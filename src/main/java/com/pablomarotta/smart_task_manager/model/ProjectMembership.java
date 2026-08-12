@@ -1,6 +1,8 @@
 package com.pablomarotta.smart_task_manager.model;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Column;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -42,6 +44,11 @@ public class ProjectMembership {
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    @Builder.Default
+    private ProjectRole role = ProjectRole.MEMBER;
 
     @CreationTimestamp
     @Column(name = "joined_at", nullable = false, updatable = false)

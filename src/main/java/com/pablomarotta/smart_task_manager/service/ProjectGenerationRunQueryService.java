@@ -6,9 +6,12 @@ import com.pablomarotta.smart_task_manager.dto.planning.PlanQualityReport;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationRunDetailResponse;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationRunSummaryResponse;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectPlanDraft;
+import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
+import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.repository.ProjectGenerationRunRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,24 +22,19 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
+@RequiredArgsConstructor
 public class ProjectGenerationRunQueryService {
     private static final long STALE_PROCESSING_MINUTES = 2;
 
     private final ProjectGenerationRunRepository runRepository;
     private final ObjectMapper objectMapper;
-
-    public ProjectGenerationRunQueryService(
-            ProjectGenerationRunRepository runRepository,
-            ObjectMapper objectMapper
-    ) {
-        this.runRepository = runRepository;
-        this.objectMapper = objectMapper;
-    }
+    private final ProjectAccessPolicy accessPolicy;
 
     @Transactional(readOnly = true)
     public List<ProjectGenerationRunSummaryResponse> listRecent(String username) {
         return runRepository.findTop10ByRequestedByUsernameOrderByUpdatedAtDesc(username)
                 .stream()
+                .filter(run -> isVisibleToRequester(run, username))
                 .map(this::summary)
                 .toList();
     }
@@ -48,6 +46,7 @@ public class ProjectGenerationRunQueryService {
                         HttpStatus.NOT_FOUND,
                         "Generation run not found"
                 ));
+        requireCurrentMembershipForExistingProjectRun(run, username);
         ProjectGenerationRunSummaryResponse summary = summary(run);
         return new ProjectGenerationRunDetailResponse(
                 summary.runId(),
@@ -68,6 +67,31 @@ public class ProjectGenerationRunQueryService {
                 run.getRevisionCount(),
                 run.getModelName()
         );
+    }
+
+    private void requireCurrentMembershipForExistingProjectRun(
+            ProjectGenerationRun run,
+            String username
+    ) {
+        if (run.getMode() != ProjectGenerationMode.EXISTING_TASK) {
+            return;
+        }
+        if (run.getProject() == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Generation run not found");
+        }
+        accessPolicy.requireMember(run.getProject().getId(), username);
+    }
+
+    private boolean isVisibleToRequester(ProjectGenerationRun run, String username) {
+        if (run.getMode() != ProjectGenerationMode.EXISTING_TASK || run.getProject() == null) {
+            return run.getMode() != ProjectGenerationMode.EXISTING_TASK;
+        }
+        try {
+            accessPolicy.requireMember(run.getProject().getId(), username);
+            return true;
+        } catch (ProjectNotFoundException exception) {
+            return false;
+        }
     }
 
     static boolean isRetryable(ProjectGenerationRun run, LocalDateTime now) {

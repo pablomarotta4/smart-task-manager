@@ -14,11 +14,13 @@ import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectGenerationRunRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
 
 @Service
+@RequiredArgsConstructor
 public class ProjectGenerationService {
     private final ProjectGenerationRunRepository runRepository;
     private final UserRepository userRepository;
@@ -26,22 +28,6 @@ public class ProjectGenerationService {
     private final ProjectPlanningContextService contextService;
     private final ProjectGenerationRunRetryClaimService retryClaimService;
     private final ObjectMapper objectMapper;
-
-    public ProjectGenerationService(
-            ProjectGenerationRunRepository runRepository,
-            UserRepository userRepository,
-            AIPlanningClient aiPlanningClient,
-            ProjectPlanningContextService contextService,
-            ProjectGenerationRunRetryClaimService retryClaimService,
-            ObjectMapper objectMapper
-    ) {
-        this.runRepository = runRepository;
-        this.userRepository = userRepository;
-        this.aiPlanningClient = aiPlanningClient;
-        this.contextService = contextService;
-        this.retryClaimService = retryClaimService;
-        this.objectMapper = objectMapper;
-    }
 
     public ProjectGenerationDraftResponse generateDraft(String username, String prompt) {
         User requester = userRepository.findByUsername(username)

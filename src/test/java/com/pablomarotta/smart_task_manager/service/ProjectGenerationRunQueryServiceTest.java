@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.PlanningTestFixtures;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationRunDetailResponse;
 import com.pablomarotta.smart_task_manager.dto.planning.ProjectGenerationRunSummaryResponse;
+import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
@@ -33,6 +34,8 @@ class ProjectGenerationRunQueryServiceTest {
 
     @Mock
     private ProjectGenerationRunRepository runRepository;
+    @Mock
+    private ProjectAccessPolicy accessPolicy;
 
     private ProjectGenerationRunQueryService service;
     private ObjectMapper objectMapper;
@@ -41,7 +44,7 @@ class ProjectGenerationRunQueryServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         objectMapper = new ObjectMapper().findAndRegisterModules();
-        service = new ProjectGenerationRunQueryService(runRepository, objectMapper);
+        service = new ProjectGenerationRunQueryService(runRepository, objectMapper, accessPolicy);
         User owner = User.builder()
                 .id(7L)
                 .username("alice")
@@ -97,6 +100,32 @@ class ProjectGenerationRunQueryServiceTest {
         assertEquals(2, summary.attemptCount());
         assertEquals("AI_PLANNING_UNAVAILABLE", summary.errorCode());
         assertTrue(summary.retryable());
+    }
+
+    @Test
+    void hidesExistingProjectRunsAfterRequesterLosesMembership() {
+        when(runRepository.findTop10ByRequestedByUsernameOrderByUpdatedAtDesc("alice"))
+                .thenReturn(List.of(run));
+        when(accessPolicy.requireMember(20L, "alice"))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 20"));
+
+        List<ProjectGenerationRunSummaryResponse> response = service.listRecent("alice");
+
+        assertTrue(response.isEmpty());
+    }
+
+    @Test
+    void hidesDeletedExistingProjectRunDetail() {
+        run.setProject(null);
+        when(runRepository.findByIdAndRequestedByUsername(run.getId(), "alice"))
+                .thenReturn(Optional.of(run));
+
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
+                () -> service.get(run.getId(), "alice")
+        );
+
+        assertEquals(404, exception.getStatusCode().value());
     }
 
     @Test

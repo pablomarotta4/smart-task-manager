@@ -7,6 +7,7 @@ import DraftEditor from "./components/DraftEditor";
 import MyWorkSection from "./components/MyWorkSection";
 import ProjectsSection from "./components/ProjectsSection";
 import RecentPlanningRuns from "./components/RecentPlanningRuns";
+import useProjectWorkspace from "./hooks/useProjectWorkspace";
 
 const SESSION_KEY = "smart-task-session";
 
@@ -52,20 +53,6 @@ export default function App({ client = apiClient }) {
   const [confirmation, setConfirmation] = useState(null);
   const [planningTarget, setPlanningTarget] = useState(null);
   const [activeView, setActiveView] = useState("workshop");
-  const [projects, setProjects] = useState([]);
-  const [selectedProject, setSelectedProject] = useState(null);
-  const [projectTasks, setProjectTasks] = useState([]);
-  const [projectMembers, setProjectMembers] = useState([]);
-  const [projectPhase, setProjectPhase] = useState("idle");
-  const [projectError, setProjectError] = useState("");
-  const [projectMutationPhase, setProjectMutationPhase] = useState("idle");
-  const [projectMutationError, setProjectMutationError] = useState("");
-  const [selectedTask, setSelectedTask] = useState(null);
-  const [taskMutationPhase, setTaskMutationPhase] = useState("idle");
-  const [taskError, setTaskError] = useState("");
-  const [memberMutationPhase, setMemberMutationPhase] = useState("idle");
-  const [memberError, setMemberError] = useState("");
-  const [workItems, setWorkItems] = useState([]);
   const [phase, setPhase] = useState("idle");
   const [error, setError] = useState("");
   const [recentRuns, setRecentRuns] = useState([]);
@@ -100,24 +87,10 @@ export default function App({ client = apiClient }) {
     setPlanningTarget(null);
     setPrompt("");
     setActiveView("workshop");
-    setProjects([]);
-    setSelectedProject(null);
-    setProjectTasks([]);
-    setProjectMembers([]);
-    setSelectedTask(null);
-    setTaskError("");
-    setMemberError("");
-    setMemberMutationPhase("idle");
-    setTaskMutationPhase("idle");
-    setWorkItems([]);
     setRecentRuns([]);
     setRecentRunsError("");
     setRecentRunsPhase("idle");
     setBusyRunId(null);
-    setProjectError("");
-    setProjectPhase("idle");
-    setProjectMutationError("");
-    setProjectMutationPhase("idle");
     setAuthMode("login");
     setCredentials((current) => ({ ...current, password: "" }));
     setRegistration({ fullName: "", email: "", username: "", password: "" });
@@ -181,6 +154,32 @@ export default function App({ client = apiClient }) {
       throw requestError;
     }
   }, [clearWorkspaceSession, refreshAccessToken, sessionToken]);
+
+  const workspace = useProjectWorkspace({
+    client,
+    executeAuthenticated: runAuthenticated,
+    sessionKey: session?.user?.id ?? null,
+    currentUserId: session?.user?.id ?? null,
+  });
+  const {
+    projects,
+    selectedProject,
+    projectTasks,
+    projectMembers,
+    workItems,
+    selectedTask,
+    projectPhase,
+    projectError,
+    memberLoadPhase,
+    memberLoadError,
+    projectMutationPhase,
+    projectMutationError,
+    taskMutationPhase,
+    taskError,
+    memberMutationPhase,
+    memberError,
+    permissions: selectedProjectPermissions,
+  } = workspace;
 
   useEffect(() => {
     if (!sessionToken || sessionStatus !== "checking") return undefined;
@@ -358,334 +357,41 @@ export default function App({ client = apiClient }) {
     setPhase("idle");
   };
 
-  const handleProjectRequestError = (requestError) => {
-    setProjectError(errorMessage(requestError));
-    setProjectPhase("idle");
-  };
-
   const handleOpenProjects = async (projectId = null) => {
     setActiveView("projects");
-    setProjectError("");
-    setMemberError("");
-    setProjectPhase("loading-projects");
-    setSelectedProject(null);
-    setProjectTasks([]);
-    setProjectMembers([]);
-    setSelectedTask(null);
-
-    try {
-      const [loadedProjects, loadedTasks] = await runAuthenticated((token) => {
-        const projectsRequest = client.getProjects({ token });
-        const tasksRequest = projectId === null
-          ? Promise.resolve(null)
-          : client.getProjectTasks({ token, projectId });
-        return Promise.all([projectsRequest, tasksRequest]);
-      });
-      setProjects(loadedProjects);
-
-      if (projectId !== null) {
-        const project = loadedProjects.find((candidate) => candidate.id === projectId) ?? null;
-        setSelectedProject(project);
-        setProjectTasks(project ? loadedTasks : []);
-      }
-      setProjectPhase("idle");
-    } catch (requestError) {
-      handleProjectRequestError(requestError);
-    }
+    await workspace.openProjects(projectId);
   };
 
-  const handleSelectProject = async (project) => {
-    setSelectedProject(project);
-    setProjectTasks([]);
-    setProjectMembers([]);
-    setSelectedTask(null);
-    setProjectError("");
-    setMemberError("");
-    setProjectPhase("loading-tasks");
-    try {
-      const [tasks, members] = await runAuthenticated((token) => Promise.all([
-        client.getProjectTasks({ token, projectId: project.id }),
-        client.getProjectMembers({ token, projectId: project.id }),
-      ]));
-      setProjectTasks(tasks);
-      setProjectMembers(members);
-      setProjectPhase("idle");
-    } catch (requestError) {
-      handleProjectRequestError(requestError);
-    }
-  };
+  const handleSelectProject = (project) => workspace.selectProject(project);
+  const handleSelectBoardProject = (project) => workspace.selectProject(
+    project,
+    { includeMembers: true },
+  );
 
   const handleRetryProjects = () => {
     if (selectedProject) {
-      handleSelectProject(selectedProject);
+      void workspace.selectProject(selectedProject);
       return;
     }
-    handleOpenProjects();
+    void handleOpenProjects();
   };
 
-  const handleCreateProject = async (project) => {
-    setProjectMutationError("");
-    setProjectMutationPhase("creating");
-    try {
-      const created = await runAuthenticated((token) => client.createProject({ token, project }));
-      setProjects((current) => [created, ...current.filter(
-        (candidate) => candidate.id !== created.id,
-      )]);
-      setSelectedProject(created);
-      setProjectTasks([]);
-      setProjectMembers([]);
-      setSelectedTask(null);
-      return true;
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setProjectMutationError(errorMessage(requestError));
-      }
-      return false;
-    } finally {
-      setProjectMutationPhase("idle");
-    }
-  };
-
-  const handleUpdateProject = async (project, projectDraft) => {
-    setProjectMutationError("");
-    setProjectMutationPhase("updating");
-    try {
-      const updated = await runAuthenticated((token) => client.updateProject({
-        token,
-        projectId: project.id,
-        project: projectDraft,
-      }));
-      const mergedProject = { ...project, ...updated };
-      setProjects((current) => current.map(
-        (candidate) => candidate.id === project.id ? mergedProject : candidate,
-      ));
-      setSelectedProject((current) => current?.id === project.id ? mergedProject : current);
-      return true;
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setProjectMutationError(errorMessage(requestError));
-      }
-      return false;
-    } finally {
-      setProjectMutationPhase("idle");
-    }
-  };
-
-  const handleDeleteProject = async (project) => {
-    setProjectMutationError("");
-    setProjectMutationPhase("deleting");
-    try {
-      await runAuthenticated((token) => client.deleteProject({ token, projectId: project.id }));
-      setProjects((current) => current.filter((candidate) => candidate.id !== project.id));
-      setSelectedProject(null);
-      setProjectTasks([]);
-      setProjectMembers([]);
-      setSelectedTask(null);
+  const handleDeleteProject = async (projectId) => {
+    const deleted = await workspace.deleteProject(projectId);
+    if (deleted) {
       setActiveView("projects");
-      return true;
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setProjectMutationError(errorMessage(requestError));
-      }
-      return false;
-    } finally {
-      setProjectMutationPhase("idle");
     }
+    return deleted;
   };
 
   const handleOpenBoard = async (projectId = selectedProject?.id ?? null) => {
     setActiveView("board");
-    setProjectError("");
-    setMemberError("");
-    setProjectPhase("loading-projects");
-    setProjectTasks([]);
-    setProjectMembers([]);
-    setSelectedTask(null);
-
-    try {
-      const loadedProjects = await runAuthenticated((token) => client.getProjects({ token }));
-      setProjects(loadedProjects);
-      const project = projectId === null
-        ? loadedProjects[0] ?? null
-        : loadedProjects.find((candidate) => candidate.id === projectId)
-          ?? loadedProjects[0]
-          ?? null;
-      setSelectedProject(project);
-
-      if (project) {
-        setProjectPhase("loading-tasks");
-        const [tasks, members] = await runAuthenticated((token) => Promise.all([
-          client.getProjectTasks({ token, projectId: project.id }),
-          client.getProjectMembers({ token, projectId: project.id }),
-        ]));
-        setProjectTasks(tasks);
-        setProjectMembers(members);
-      }
-      setProjectPhase("idle");
-    } catch (requestError) {
-      handleProjectRequestError(requestError);
-    }
-  };
-
-  const handleSaveTask = async (task, taskDraft) => {
-    setTaskMutationPhase("updating");
-    setTaskError("");
-    try {
-      const updated = await runAuthenticated((token) => client.updateTask({
-        token,
-        taskId: task.id,
-        task: taskDraft,
-      }));
-      const mergedTask = {
-        ...task,
-        title: updated.title ?? taskDraft.title,
-        description: updated.description ?? taskDraft.description,
-        status: updated.status ?? taskDraft.status,
-        priority: updated.priority ?? taskDraft.priority,
-        dueDate: updated.dueDate === undefined ? taskDraft.dueDate : updated.dueDate,
-        position: updated.position ?? taskDraft.position,
-        assigneeId: updated.assigneeId === undefined ? taskDraft.assigneeId : updated.assigneeId,
-        assigneeUsername: updated.assigneeUsername === undefined
-          ? projectMembers.find((member) => member.userId === taskDraft.assigneeId)?.username
-            ?? (task.assigneeId === taskDraft.assigneeId ? task.assigneeUsername : null)
-          : updated.assigneeUsername,
-      };
-      setProjectTasks((current) => current.map(
-        (candidate) => candidate.id === task.id ? mergedTask : candidate,
-      ));
-      setWorkItems((current) => current.map(
-        (candidate) => candidate.id === task.id ? { ...candidate, ...mergedTask } : candidate,
-      ));
-      setSelectedTask(null);
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setTaskError(errorMessage(requestError));
-      }
-    } finally {
-      setTaskMutationPhase("idle");
-    }
-  };
-
-  const updateProjectTaskCount = (projectId, delta) => {
-    setProjects((current) => current.map((project) => project.id === projectId
-      ? { ...project, taskCount: Math.max(0, (project.taskCount ?? 0) + delta) }
-      : project));
-    setSelectedProject((current) => current?.id === projectId
-      ? { ...current, taskCount: Math.max(0, (current.taskCount ?? 0) + delta) }
-      : current);
-  };
-
-  const handleCreateTask = async (task) => {
-    setTaskError("");
-    setTaskMutationPhase("creating");
-    try {
-      const created = await runAuthenticated((token) => client.createTask({ token, task }));
-      const normalizedTask = {
-        acceptanceCriteria: [],
-        dependsOn: [],
-        ...task,
-        ...created,
-        assigneeUsername: created.assigneeUsername === undefined
-          ? projectMembers.find((member) => member.userId === task.assigneeId)?.username ?? null
-          : created.assigneeUsername,
-      };
-      setProjectTasks((current) => [...current, normalizedTask]);
-      updateProjectTaskCount(task.projectId, 1);
-      return true;
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setTaskError(errorMessage(requestError));
-      }
-      return false;
-    } finally {
-      setTaskMutationPhase("idle");
-    }
-  };
-
-  const handleDeleteTask = async (task) => {
-    setTaskError("");
-    setTaskMutationPhase("deleting");
-    try {
-      await runAuthenticated((token) => client.deleteTask({ token, taskId: task.id }));
-      setProjectTasks((current) => current.filter((candidate) => candidate.id !== task.id));
-      setWorkItems((current) => current.filter((candidate) => candidate.id !== task.id));
-      updateProjectTaskCount(task.projectId, -1);
-      setSelectedTask(null);
-      return true;
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setTaskError(errorMessage(requestError));
-      }
-      return false;
-    } finally {
-      setTaskMutationPhase("idle");
-    }
+    await workspace.openBoard(projectId);
   };
 
   const handleOpenMyWork = async () => {
     setActiveView("my-work");
-    setProjectError("");
-    setProjectPhase("loading-tasks");
-    setSelectedTask(null);
-    setWorkItems([]);
-
-    try {
-      const assignedTasks = await runAuthenticated((token) => client.getMyWork({ token }));
-      setWorkItems(assignedTasks);
-      setProjectPhase("idle");
-    } catch (requestError) {
-      handleProjectRequestError(requestError);
-    }
-  };
-
-  const handleAddProjectMember = async (username) => {
-    setMemberError("");
-    setMemberMutationPhase("adding");
-    try {
-      const member = await runAuthenticated((token) => client.addProjectMember({
-        token,
-        projectId: selectedProject.id,
-        username,
-      }));
-      setProjectMembers((current) => [
-        ...current.filter((candidate) => candidate.userId !== member.userId),
-        member,
-      ]);
-      return true;
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setMemberError(errorMessage(requestError));
-      }
-      return false;
-    } finally {
-      setMemberMutationPhase("idle");
-    }
-  };
-
-  const handleRemoveProjectMember = async (member) => {
-    setMemberError("");
-    setMemberMutationPhase("removing");
-    try {
-      await runAuthenticated((token) => client.removeProjectMember({
-        token,
-        projectId: selectedProject.id,
-        userId: member.userId,
-      }));
-      setProjectMembers((current) => current.filter(
-        (candidate) => candidate.userId !== member.userId,
-      ));
-      setProjectTasks((current) => current.map((task) => task.assigneeId === member.userId
-        ? { ...task, assigneeId: null, assigneeUsername: null }
-        : task));
-      return true;
-    } catch (requestError) {
-      if (!(requestError instanceof ApiError && requestError.status === 401)) {
-        setMemberError(errorMessage(requestError));
-      }
-      return false;
-    } finally {
-      setMemberMutationPhase("idle");
-    }
+    await workspace.openMyWork();
   };
 
   const handlePlanFollowUp = (project) => {
@@ -712,7 +418,7 @@ export default function App({ client = apiClient }) {
     setDraftResponse(null);
     setEditableDraft(null);
     setConfirmation(null);
-    setSelectedTask(null);
+    workspace.closeTask();
     setError("");
     setPhase("idle");
     setActiveView("workshop");
@@ -1056,7 +762,7 @@ export default function App({ client = apiClient }) {
           error={projectError}
           mutationPhase={projectMutationPhase}
           mutationError={projectMutationError}
-          onCreateProject={handleCreateProject}
+          onCreateProject={workspace.createProject}
           onSelectProject={handleSelectProject}
           onRetry={handleRetryProjects}
         />
@@ -1076,20 +782,21 @@ export default function App({ client = apiClient }) {
           memberError={memberError}
           projectMutationPhase={projectMutationPhase}
           projectMutationError={projectMutationError}
-          onSelectProject={handleSelectProject}
-          onSelectTask={(task) => {
-            setTaskError("");
-            setSelectedTask(task);
-          }}
-          onCloseTask={() => setSelectedTask(null)}
-          onSaveTask={handleSaveTask}
-          onCreateTask={handleCreateTask}
-          onDeleteTask={handleDeleteTask}
-          onAddProjectMember={handleAddProjectMember}
-          onRemoveProjectMember={handleRemoveProjectMember}
+          memberLoadPhase={memberLoadPhase}
+          memberLoadError={memberLoadError}
+          permissions={selectedProjectPermissions}
+          currentUserId={session.user.id}
+          onSelectProject={handleSelectBoardProject}
+          onSelectTask={workspace.selectTask}
+          onCloseTask={workspace.closeTask}
+          onSaveTask={workspace.updateTask}
+          onCreateTask={workspace.createTask}
+          onDeleteTask={workspace.deleteTask}
+          onAddProjectMember={workspace.addMember}
+          onRemoveProjectMember={workspace.removeMember}
           onPlanTask={handlePlanTask}
           onPlanFollowUp={handlePlanFollowUp}
-          onUpdateProject={handleUpdateProject}
+          onUpdateProject={workspace.updateProject}
           onDeleteProject={handleDeleteProject}
           onRetry={() => handleOpenBoard(selectedProject?.id ?? null)}
         />
@@ -1101,12 +808,10 @@ export default function App({ client = apiClient }) {
           selectedTask={selectedTask}
           savingTask={taskMutationPhase === "updating"}
           taskError={taskError}
-          onSelectTask={(task) => {
-            setTaskError("");
-            setSelectedTask(task);
-          }}
-          onCloseTask={() => setSelectedTask(null)}
-          onSaveTask={handleSaveTask}
+          currentUserId={session.user.id}
+          onSelectTask={workspace.selectTask}
+          onCloseTask={workspace.closeTask}
+          onSaveTask={workspace.updateTask}
           onRetry={handleOpenMyWork}
         />
       ) : activeView === "account" ? (

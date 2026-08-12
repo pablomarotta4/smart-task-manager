@@ -1,4 +1,5 @@
 import TicketDetailPanel from "./TicketDetailPanel";
+import { assignedWorkPermissions } from "../lib/projectPermissions";
 
 const formatDate = (value) => {
   if (!value) return "No due date";
@@ -50,6 +51,7 @@ export default function MyWorkSection({
   selectedTask,
   savingTask,
   taskError,
+  currentUserId,
   onSelectTask,
   onCloseTask,
   onSaveTask,
@@ -73,6 +75,10 @@ export default function MyWorkSection({
       return left.dueDate.localeCompare(right.dueDate);
     });
   const completed = items.filter((task) => task.status === "DONE").length;
+  const selectedTaskPermissions = assignedWorkPermissions({
+    task: selectedTask,
+    currentUserId,
+  });
 
   return (
     <section className="my-work-stage" aria-labelledby="my-work-title" aria-busy={loading}>
@@ -88,8 +94,10 @@ export default function MyWorkSection({
 
       {error ? (
         <div className="projects-error" role="alert">
-          <p>{error}</p>
-          <button className="text-action" type="button" onClick={onRetry}>Try again</button>
+          <p>{error.message}</p>
+          {error.retryable ? (
+            <button className="text-action" type="button" onClick={onRetry}>Try again</button>
+          ) : null}
         </div>
       ) : null}
 
@@ -164,7 +172,7 @@ export default function MyWorkSection({
         <TicketDetailPanel
           key={selectedTask.id}
           task={selectedTask}
-          canManage={false}
+          permissions={selectedTaskPermissions}
           saving={savingTask}
           error={taskError}
           onClose={onCloseTask}

@@ -5,8 +5,8 @@ import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.repository.ProjectGenerationRunRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -15,28 +15,20 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Service
+@RequiredArgsConstructor
 public class ProjectGenerationRunRetryClaimService {
     private final ProjectGenerationRunRepository runRepository;
     private final ProjectPlanningContextService contextService;
-
-    public ProjectGenerationRunRetryClaimService(
-            ProjectGenerationRunRepository runRepository,
-            ProjectPlanningContextService contextService
-    ) {
-        this.runRepository = runRepository;
-        this.contextService = contextService;
-    }
+    private final ProjectAccessPolicy accessPolicy;
 
     @Transactional
     public RetryClaim claim(UUID runId, String username) {
-        ProjectGenerationRun run = runRepository.findLockedById(runId)
+        ProjectGenerationRun run = runRepository.findLockedByIdAndRequestedByUsername(runId, username)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "Generation run not found"
                 ));
-        if (!run.getRequestedBy().getUsername().equals(username)) {
-            throw new AccessDeniedException("Only the generation run owner can retry it");
-        }
+        requireCurrentManagerForExistingProjectRun(run, username);
         if (!ProjectGenerationRunQueryService.isRetryable(run, LocalDateTime.now())) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
@@ -72,6 +64,19 @@ public class ProjectGenerationRunRetryClaimService {
         run.setModelName(null);
         runRepository.save(run);
         return new RetryClaim(run, context);
+    }
+
+    private void requireCurrentManagerForExistingProjectRun(ProjectGenerationRun run, String username) {
+        if (run.getMode() != ProjectGenerationMode.EXISTING_TASK) {
+            return;
+        }
+        if (run.getProject() == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "The selected planning target is no longer available"
+            );
+        }
+        accessPolicy.requireManager(run.getProject().getId(), username);
     }
 
     public record RetryClaim(

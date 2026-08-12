@@ -9,6 +9,7 @@ import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationRun;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.ProjectMembership;
+import com.pablomarotta.smart_task_manager.model.ProjectRole;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationStatus;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
@@ -20,8 +21,8 @@ import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -38,6 +39,7 @@ import java.util.Set;
 import java.util.UUID;
 
 @Service
+@RequiredArgsConstructor
 public class ProjectGenerationConfirmationService {
     private final ProjectGenerationRunRepository runRepository;
     private final ProjectRepository projectRepository;
@@ -47,26 +49,7 @@ public class ProjectGenerationConfirmationService {
     private final ProjectMembershipRepository membershipRepository;
     private final ProjectPlanningContextService contextService;
     private final ObjectMapper objectMapper;
-
-    public ProjectGenerationConfirmationService(
-            ProjectGenerationRunRepository runRepository,
-            ProjectRepository projectRepository,
-            TaskRepository taskRepository,
-            TaskAcceptanceCriterionRepository criterionRepository,
-            TaskDependencyRepository dependencyRepository,
-            ProjectMembershipRepository membershipRepository,
-            ProjectPlanningContextService contextService,
-            ObjectMapper objectMapper
-    ) {
-        this.runRepository = runRepository;
-        this.projectRepository = projectRepository;
-        this.taskRepository = taskRepository;
-        this.criterionRepository = criterionRepository;
-        this.dependencyRepository = dependencyRepository;
-        this.membershipRepository = membershipRepository;
-        this.contextService = contextService;
-        this.objectMapper = objectMapper;
-    }
+    private final ProjectAccessPolicy accessPolicy;
 
     @Transactional
     public ProjectGenerationConfirmationResponse confirm(
@@ -74,11 +57,9 @@ public class ProjectGenerationConfirmationService {
             String username,
             ProjectPlanDraft draft
     ) {
-        ProjectGenerationRun run = runRepository.findLockedById(runId)
+        ProjectGenerationRun run = runRepository.findLockedByIdAndRequestedByUsername(runId, username)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Generation run not found"));
-        if (!run.getRequestedBy().getUsername().equals(username)) {
-            throw new AccessDeniedException("Only the generation run owner can confirm it");
-        }
+        requireCurrentManagerForExistingProjectRun(run, username);
         if (run.getStatus() == ProjectGenerationStatus.CONFIRMED) {
             List<Long> taskIds = taskRepository.findByGenerationRunIdOrderByPositionAsc(runId)
                     .stream()
@@ -161,6 +142,7 @@ public class ProjectGenerationConfirmationService {
         membershipRepository.save(ProjectMembership.builder()
                 .project(project)
                 .user(run.getRequestedBy())
+                .role(ProjectRole.OWNER)
                 .build());
         return new ConfirmationTarget(project, null, 0);
     }
@@ -196,6 +178,19 @@ public class ProjectGenerationConfirmationService {
         taskRepository.save(targetTask);
         int firstPosition = Math.toIntExact(taskRepository.countByProjectId(current.project().getId()));
         return new ConfirmationTarget(current.project(), targetTask, firstPosition);
+    }
+
+    private void requireCurrentManagerForExistingProjectRun(ProjectGenerationRun run, String username) {
+        if (run.getMode() != ProjectGenerationMode.EXISTING_TASK) {
+            return;
+        }
+        if (run.getProject() == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "The selected planning target is no longer available"
+            );
+        }
+        accessPolicy.requireManager(run.getProject().getId(), username);
     }
 
     private record ConfirmationTarget(

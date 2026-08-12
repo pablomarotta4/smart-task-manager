@@ -70,7 +70,7 @@ export default function ProjectsSection({
       {showCreatePanel ? (
         <ProjectCreatePanel
           creating={mutationPhase === "creating"}
-          error={mutationError}
+          error={mutationError?.message ?? null}
           onCreate={onCreateProject}
           onCancel={() => setShowCreatePanel(false)}
         />
@@ -78,8 +78,10 @@ export default function ProjectsSection({
 
       {error ? (
         <div className="projects-error" role="alert">
-          <p>{error}</p>
-          <button className="text-action" type="button" onClick={onRetry}>Try again</button>
+          <p>{error.message}</p>
+          {error.retryable ? (
+            <button className="text-action" type="button" onClick={onRetry}>Try again</button>
+          ) : null}
         </div>
       ) : null}
 

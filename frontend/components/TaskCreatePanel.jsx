@@ -12,7 +12,15 @@ const EMPTY_TASK = {
 
 const labelFor = (value) => value.toLowerCase().replaceAll("_", " ");
 
-export default function TaskCreatePanel({ project, members, creating, error, onCreate, onCancel }) {
+export default function TaskCreatePanel({
+  project,
+  members,
+  permissions,
+  creating,
+  error,
+  onCreate,
+  onCancel,
+}) {
   const [draft, setDraft] = useState(EMPTY_TASK);
 
   const handleChange = (event) => {
@@ -22,12 +30,14 @@ export default function TaskCreatePanel({ project, members, creating, error, onC
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const created = await onCreate({
+    const created = await onCreate(project.id, {
       title: draft.title.trim(),
       description: draft.description.trim() || null,
       status: "TODO",
       projectId: project.id,
-      assigneeId: draft.assigneeId ? Number(draft.assigneeId) : null,
+      assigneeId: permissions.canAssignTask && draft.assigneeId
+        ? Number(draft.assigneeId)
+        : null,
       priority: draft.priority,
       category: draft.category.trim() || null,
       dueDate: draft.dueDate || null,
@@ -84,22 +94,24 @@ export default function TaskCreatePanel({ project, members, creating, error, onC
             ))}
           </select>
         </div>
-        <div className="field-group">
-          <label htmlFor="new-ticket-assignee">Ticket assignee</label>
-          <select
-            id="new-ticket-assignee"
-            name="assigneeId"
-            value={draft.assigneeId}
-            onChange={handleChange}
-          >
-            <option value="">Unassigned</option>
-            {members.map((member) => (
-              <option key={member.userId} value={member.userId}>
-                {member.fullName || member.username}
-              </option>
-            ))}
-          </select>
-        </div>
+        {permissions.canAssignTask ? (
+          <div className="field-group">
+            <label htmlFor="new-ticket-assignee">Ticket assignee</label>
+            <select
+              id="new-ticket-assignee"
+              name="assigneeId"
+              value={draft.assigneeId}
+              onChange={handleChange}
+            >
+              <option value="">Unassigned</option>
+              {members.map((member) => (
+                <option key={member.userId} value={member.userId}>
+                  {member.fullName || member.username}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <div className="field-group">
           <label htmlFor="new-ticket-category">Ticket category</label>
           <input
@@ -120,7 +132,7 @@ export default function TaskCreatePanel({ project, members, creating, error, onC
             onChange={handleChange}
           />
         </div>
-        {error ? <p className="project-mutation-error" role="alert">{error}</p> : null}
+        {error ? <p className="project-mutation-error" role="alert">{error.message}</p> : null}
         <button
           className="primary-action task-create-submit"
           type="submit"

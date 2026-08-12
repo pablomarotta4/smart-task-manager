@@ -8,7 +8,7 @@ const labelFor = (value) => value.toLowerCase().replaceAll("_", " ");
 export default function TicketDetailPanel({
   task,
   members,
-  canManage = true,
+  permissions,
   saving,
   deleting,
   error,
@@ -23,6 +23,7 @@ export default function TicketDetailPanel({
     description: task.description ?? "",
     status: task.status,
     priority: task.priority ?? "MEDIUM",
+    category: task.category ?? "",
     dueDate: task.dueDate ?? "",
     assigneeId: task.assigneeId == null ? "" : String(task.assigneeId),
   });
@@ -49,15 +50,17 @@ export default function TicketDetailPanel({
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    onSave(task, {
-      title: draft.title.trim(),
-      description: draft.description.trim(),
-      status: draft.status,
+    onSave(task.id, {
+      title: permissions.canEditTask ? draft.title.trim() : task.title,
+      description: permissions.canEditTask ? draft.description.trim() : task.description,
+      status: permissions.canChangeStatus ? draft.status : task.status,
       projectId: task.projectId,
-      assigneeId: draft.assigneeId ? Number(draft.assigneeId) : null,
-      priority: draft.priority,
-      category: task.category ?? null,
-      dueDate: draft.dueDate || null,
+      assigneeId: permissions.canAssignTask
+        ? draft.assigneeId ? Number(draft.assigneeId) : null
+        : task.assigneeId ?? null,
+      priority: permissions.canChangePriority ? draft.priority : task.priority,
+      category: permissions.canChangeCategory ? draft.category.trim() || null : task.category ?? null,
+      dueDate: permissions.canChangeDueDate ? draft.dueDate || null : task.dueDate ?? null,
       position: task.position,
     });
   };
@@ -73,7 +76,9 @@ export default function TicketDetailPanel({
         <header className="ticket-sheet-header">
           <div>
             <p className="section-index">Ticket #{task.id}</p>
-            <h2 id={`edit-ticket-${task.id}`}>Edit {task.title}</h2>
+            <h2 id={`edit-ticket-${task.id}`}>
+              {permissions.canEditTask ? "Edit" : "View"} {task.title}
+            </h2>
           </div>
           <button
             ref={closeButtonRef}
@@ -94,6 +99,7 @@ export default function TicketDetailPanel({
               name="title"
               value={draft.title}
               onChange={handleChange}
+              readOnly={!permissions.canEditTask}
               maxLength={255}
               required
             />
@@ -106,6 +112,7 @@ export default function TicketDetailPanel({
               name="description"
               value={draft.description}
               onChange={handleChange}
+              readOnly={!permissions.canEditTask}
               rows={5}
             />
           </div>
@@ -118,13 +125,14 @@ export default function TicketDetailPanel({
                 name="status"
                 value={draft.status}
                 onChange={handleChange}
+                disabled={!permissions.canChangeStatus}
               >
                 {STATUSES.map((status) => (
                   <option key={status} value={status}>{labelFor(status)}</option>
                 ))}
               </select>
             </div>
-            {canManage ? (
+            {permissions.canChangePriority ? (
               <div className="field-group">
                 <label htmlFor={`ticket-priority-${task.id}`}>Priority</label>
                 <select
@@ -139,6 +147,18 @@ export default function TicketDetailPanel({
                 </select>
               </div>
             ) : null}
+            {permissions.canChangeCategory ? (
+              <div className="field-group">
+                <label htmlFor={`ticket-category-${task.id}`}>Category</label>
+                <input
+                  id={`ticket-category-${task.id}`}
+                  name="category"
+                  value={draft.category}
+                  onChange={handleChange}
+                  maxLength={32}
+                />
+              </div>
+            ) : null}
             <div className="field-group">
               <label htmlFor={`ticket-due-${task.id}`}>Due date</label>
               <input
@@ -147,9 +167,10 @@ export default function TicketDetailPanel({
                 type="date"
                 value={draft.dueDate}
                 onChange={handleChange}
+                disabled={!permissions.canChangeDueDate}
               />
             </div>
-            {canManage && members ? (
+            {permissions.canAssignTask && members ? (
               <div className="field-group">
                 <label htmlFor={`ticket-assignee-${task.id}`}>Assignee</label>
                 <select
@@ -187,9 +208,9 @@ export default function TicketDetailPanel({
             </section>
           ) : null}
 
-          {error ? <p className="error-banner" role="alert">{error}</p> : null}
+          {error ? <p className="error-banner" role="alert">{error.message}</p> : null}
 
-          {onDelete && confirmingDelete ? (
+          {permissions.canDeleteTask && onDelete && confirmingDelete ? (
             <div
               className="ticket-delete-confirmation"
               role="alertdialog"
@@ -212,7 +233,7 @@ export default function TicketDetailPanel({
                   className="danger-action is-confirm"
                   type="button"
                   disabled={deleting}
-                  onClick={() => onDelete(task)}
+                  onClick={() => onDelete(task.id, task.projectId)}
                 >
                   {deleting ? "Deleting ticket…" : "Yes, delete ticket"}
                 </button>
@@ -221,7 +242,7 @@ export default function TicketDetailPanel({
           ) : null}
 
           <footer className="ticket-sheet-actions">
-            {onDelete ? (
+            {permissions.canDeleteTask && onDelete ? (
               <button
                 className="danger-action"
                 type="button"
@@ -232,7 +253,7 @@ export default function TicketDetailPanel({
               </button>
             ) : <span />}
             <div>
-              {onPlanWithAI ? (
+              {permissions.canPlanTask && onPlanWithAI ? (
                 <button
                   className="text-action"
                   type="button"
@@ -243,15 +264,17 @@ export default function TicketDetailPanel({
                 </button>
               ) : null}
               <button className="text-action" type="button" onClick={onClose}>Cancel</button>
-              <button
-                className="primary-action"
-                type="submit"
-                disabled={saving || deleting || !draft.title.trim()}
-                aria-busy={saving}
-              >
-                <span>{saving ? "Saving…" : "Save ticket"}</span>
-                <span aria-hidden="true">↗</span>
-              </button>
+              {permissions.canEditTask ? (
+                <button
+                  className="primary-action"
+                  type="submit"
+                  disabled={saving || deleting || !draft.title.trim()}
+                  aria-busy={saving}
+                >
+                  <span>{saving ? "Saving…" : "Save ticket"}</span>
+                  <span aria-hidden="true">↗</span>
+                </button>
+              ) : null}
             </div>
           </footer>
         </form>

@@ -16,6 +16,16 @@ public interface ProjectGenerationRunRepository extends JpaRepository<ProjectGen
     @Query("select run from ProjectGenerationRun run where run.id = :id")
     Optional<ProjectGenerationRun> findLockedById(@Param("id") UUID id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select run from ProjectGenerationRun run
+            where run.id = :id and run.requestedBy.username = :username
+            """)
+    Optional<ProjectGenerationRun> findLockedByIdAndRequestedByUsername(
+            @Param("id") UUID id,
+            @Param("username") String username
+    );
+
     List<ProjectGenerationRun> findTop10ByRequestedByUsernameOrderByUpdatedAtDesc(String username);
 
     Optional<ProjectGenerationRun> findByIdAndRequestedByUsername(UUID id, String username);

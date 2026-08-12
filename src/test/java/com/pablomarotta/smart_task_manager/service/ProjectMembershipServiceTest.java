@@ -5,6 +5,7 @@ import com.pablomarotta.smart_task_manager.dto.ProjectMemberResponse;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectMembership;
+import com.pablomarotta.smart_task_manager.model.ProjectRole;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
@@ -41,6 +42,8 @@ class ProjectMembershipServiceTest {
     private UserRepository userRepository;
     @Mock
     private TaskRepository taskRepository;
+    @Mock
+    private ProjectAccessPolicy accessPolicy;
 
     @InjectMocks
     private ProjectMembershipService service;
@@ -58,9 +61,9 @@ class ProjectMembershipServiceTest {
 
     @Test
     void listMembersReturnsOnlyAnOwnedProjectsParticipants() {
-        ProjectMembership ownerMembership = membership(101L, owner, LocalDateTime.now().minusDays(2));
-        ProjectMembership memberMembership = membership(102L, member, LocalDateTime.now().minusDays(1));
-        when(projectRepository.findByIdAndOwnerUsername(20L, "alice")).thenReturn(Optional.of(project));
+        ProjectMembership ownerMembership = membership(101L, owner, ProjectRole.OWNER, LocalDateTime.now().minusDays(2));
+        ProjectMembership memberMembership = membership(102L, member, ProjectRole.MEMBER, LocalDateTime.now().minusDays(1));
+        when(accessPolicy.requireMember(20L, "alice")).thenReturn(ownerMembership);
         when(membershipRepository.findByProjectIdOrderByJoinedAtAsc(20L))
                 .thenReturn(List.of(ownerMembership, memberMembership));
 
@@ -69,11 +72,14 @@ class ProjectMembershipServiceTest {
         assertEquals(List.of("alice", "bob"), response.stream().map(ProjectMemberResponse::getUsername).toList());
         assertEquals(true, response.getFirst().isOwner());
         assertEquals(false, response.getLast().isOwner());
+        assertEquals(ProjectRole.OWNER, response.getFirst().getRole());
+        assertEquals(ProjectRole.MEMBER, response.getLast().getRole());
     }
 
     @Test
     void foreignOwnerCannotInspectMembership() {
-        when(projectRepository.findByIdAndOwnerUsername(20L, "mallory")).thenReturn(Optional.empty());
+        when(accessPolicy.requireMember(20L, "mallory"))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 20"));
 
         assertThrows(ProjectNotFoundException.class, () -> service.listMembers(20L, "mallory"));
 
@@ -84,7 +90,7 @@ class ProjectMembershipServiceTest {
     void addMemberPersistsAnActiveUser() {
         ProjectMemberRequest request = new ProjectMemberRequest();
         request.setUsername("bob");
-        when(projectRepository.findByIdAndOwnerUsername(20L, "alice")).thenReturn(Optional.of(project));
+        when(accessPolicy.requireManager(20L, "alice")).thenReturn(ownerMembership());
         when(userRepository.findByUsername("bob")).thenReturn(Optional.of(member));
         when(membershipRepository.findByProjectIdAndUserId(20L, 2L)).thenReturn(Optional.empty());
         when(membershipRepository.save(any(ProjectMembership.class))).thenAnswer(invocation -> {
@@ -98,6 +104,7 @@ class ProjectMembershipServiceTest {
 
         assertEquals("bob", response.getUsername());
         assertEquals(false, response.isOwner());
+        assertEquals(ProjectRole.MEMBER, response.getRole());
         verify(membershipRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
                 saved.getProject() == project && saved.getUser() == member
         ));
@@ -108,7 +115,7 @@ class ProjectMembershipServiceTest {
         member.setActive(false);
         ProjectMemberRequest request = new ProjectMemberRequest();
         request.setUsername("bob");
-        when(projectRepository.findByIdAndOwnerUsername(20L, "alice")).thenReturn(Optional.of(project));
+        when(accessPolicy.requireManager(20L, "alice")).thenReturn(ownerMembership());
         when(userRepository.findByUsername("bob")).thenReturn(Optional.of(member));
 
         ResponseStatusException error = assertThrows(
@@ -124,8 +131,8 @@ class ProjectMembershipServiceTest {
     void addingExistingMemberIsIdempotent() {
         ProjectMemberRequest request = new ProjectMemberRequest();
         request.setUsername("bob");
-        ProjectMembership existing = membership(102L, member, LocalDateTime.now());
-        when(projectRepository.findByIdAndOwnerUsername(20L, "alice")).thenReturn(Optional.of(project));
+        ProjectMembership existing = membership(102L, member, ProjectRole.MEMBER, LocalDateTime.now());
+        when(accessPolicy.requireManager(20L, "alice")).thenReturn(ownerMembership());
         when(userRepository.findByUsername("bob")).thenReturn(Optional.of(member));
         when(membershipRepository.findByProjectIdAndUserId(20L, 2L))
                 .thenReturn(Optional.of(existing));
@@ -138,8 +145,8 @@ class ProjectMembershipServiceTest {
 
     @Test
     void removeMemberClearsProjectAssignmentsBeforeMembership() {
-        ProjectMembership existing = membership(102L, member, LocalDateTime.now());
-        when(projectRepository.findByIdAndOwnerUsername(20L, "alice")).thenReturn(Optional.of(project));
+        ProjectMembership existing = membership(102L, member, ProjectRole.MEMBER, LocalDateTime.now());
+        when(accessPolicy.requireManager(20L, "alice")).thenReturn(ownerMembership());
         when(membershipRepository.findByProjectIdAndUserId(20L, 2L))
                 .thenReturn(Optional.of(existing));
 
@@ -151,7 +158,8 @@ class ProjectMembershipServiceTest {
 
     @Test
     void ownerCannotBeRemovedFromTheirProject() {
-        when(projectRepository.findByIdAndOwnerUsername(20L, "alice")).thenReturn(Optional.of(project));
+        when(accessPolicy.requireManager(20L, "alice")).thenReturn(ownerMembership());
+        when(membershipRepository.findByProjectIdAndUserId(20L, 1L)).thenReturn(Optional.of(ownerMembership()));
 
         ResponseStatusException error = assertThrows(
                 ResponseStatusException.class,
@@ -163,11 +171,30 @@ class ProjectMembershipServiceTest {
         verify(membershipRepository, never()).delete(any());
     }
 
-    private ProjectMembership membership(Long id, User user, LocalDateTime joinedAt) {
+    @Test
+    void managerCannotRemoveAnotherManager() {
+        User manager = User.builder().id(3L).username("carol").fullName("Carol Manager").active(true).build();
+        ProjectMembership requester = membership(103L, manager, ProjectRole.MANAGER, LocalDateTime.now());
+        ProjectMembership target = membership(104L, member, ProjectRole.MANAGER, LocalDateTime.now());
+        when(accessPolicy.requireManager(20L, "carol")).thenReturn(requester);
+        when(membershipRepository.findByProjectIdAndUserId(20L, 2L)).thenReturn(Optional.of(target));
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> service.removeMember(20L, 2L, "carol"));
+
+        verify(membershipRepository, never()).delete(target);
+    }
+
+    private ProjectMembership ownerMembership() {
+        return membership(101L, owner, ProjectRole.OWNER, LocalDateTime.now());
+    }
+
+    private ProjectMembership membership(Long id, User user, ProjectRole role, LocalDateTime joinedAt) {
         return ProjectMembership.builder()
                 .id(id)
                 .project(project)
                 .user(user)
+                .role(role)
                 .joinedAt(joinedAt)
                 .build();
     }

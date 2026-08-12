@@ -2,17 +2,17 @@ package com.pablomarotta.smart_task_manager.service;
 
 import com.pablomarotta.smart_task_manager.dto.ProjectMemberRequest;
 import com.pablomarotta.smart_task_manager.dto.ProjectMemberResponse;
-import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectMembership;
+import com.pablomarotta.smart_task_manager.model.ProjectRole;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
-import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,16 +23,16 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ProjectMembershipService {
 
-    private final ProjectRepository projectRepository;
     private final ProjectMembershipRepository membershipRepository;
     private final UserRepository userRepository;
     private final TaskRepository taskRepository;
+    private final ProjectAccessPolicy accessPolicy;
 
     @Transactional(readOnly = true)
     public List<ProjectMemberResponse> listMembers(Long projectId, String ownerUsername) {
-        Project project = getOwnedProject(projectId, ownerUsername);
+        accessPolicy.requireMember(projectId, ownerUsername);
         return membershipRepository.findByProjectIdOrderByJoinedAtAsc(projectId).stream()
-                .map(membership -> mapToResponse(membership, project))
+                .map(this::mapToResponse)
                 .toList();
     }
 
@@ -42,7 +42,7 @@ public class ProjectMembershipService {
             ProjectMemberRequest request,
             String ownerUsername
     ) {
-        Project project = getOwnedProject(projectId, ownerUsername);
+        Project project = accessPolicy.requireManager(projectId, ownerUsername).getProject();
         User user = userRepository.findByUsername(request.getUsername().trim())
                 .orElseThrow(() -> new UserNotFoundException(
                         "User not found with username: " + request.getUsername().trim()
@@ -56,35 +56,35 @@ public class ProjectMembershipService {
                 .orElseGet(() -> membershipRepository.save(ProjectMembership.builder()
                         .project(project)
                         .user(user)
+                        .role(ProjectRole.MEMBER)
                         .build()));
-        return mapToResponse(membership, project);
+        return mapToResponse(membership);
     }
 
     @Transactional
     public void removeMember(Long projectId, Long userId, String ownerUsername) {
-        Project project = getOwnedProject(projectId, ownerUsername);
-        if (project.getOwner().getId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project owner cannot be removed");
-        }
+        ProjectMembership requester = accessPolicy.requireManager(projectId, ownerUsername);
         ProjectMembership membership = membershipRepository.findByProjectIdAndUserId(projectId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project member not found"));
+        if (membership.getRole() == ProjectRole.OWNER) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project owner cannot be removed");
+        }
+        if (requester.getRole() == ProjectRole.MANAGER && membership.getRole() != ProjectRole.MEMBER) {
+            throw new AccessDeniedException("Managers cannot remove project managers");
+        }
 
         taskRepository.clearAssigneeForProjectAndUser(projectId, userId);
         membershipRepository.delete(membership);
     }
 
-    private Project getOwnedProject(Long projectId, String username) {
-        return projectRepository.findByIdAndOwnerUsername(projectId, username)
-                .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + projectId));
-    }
-
-    private ProjectMemberResponse mapToResponse(ProjectMembership membership, Project project) {
+    private ProjectMemberResponse mapToResponse(ProjectMembership membership) {
         ProjectMemberResponse response = new ProjectMemberResponse();
         response.setMembershipId(membership.getId());
         response.setUserId(membership.getUser().getId());
         response.setUsername(membership.getUser().getUsername());
         response.setFullName(membership.getUser().getFullName());
-        response.setOwner(project.getOwner().getId().equals(membership.getUser().getId()));
+        response.setOwner(membership.getRole() == ProjectRole.OWNER);
+        response.setRole(membership.getRole());
         response.setJoinedAt(membership.getJoinedAt() == null ? null : membership.getJoinedAt().toString());
         return response;
     }

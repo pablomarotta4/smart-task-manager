@@ -23,6 +23,11 @@ public interface TaskAcceptanceCriterionRepository extends JpaRepository<TaskAcc
             from TaskAcceptanceCriterion criterion
             join fetch criterion.task task
             where task.assignee.username = :username
+              and exists (
+                  select membership.id from ProjectMembership membership
+                  where membership.project = task.project
+                    and membership.user.username = :username
+              )
             order by task.dueDate, task.position, criterion.position
             """)
     List<TaskAcceptanceCriterion> findByTaskAssigneeUsername(@Param("username") String username);

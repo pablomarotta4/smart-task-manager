@@ -3,6 +3,7 @@ import { useState } from "react";
 import TicketDetailPanel from "./TicketDetailPanel";
 import ProjectDesk from "./ProjectDesk";
 import TaskCreatePanel from "./TaskCreatePanel";
+import { ticketPermissions } from "../lib/projectPermissions";
 
 const LANES = [
   { status: "TODO", label: "Todo", marker: "01" },
@@ -33,8 +34,12 @@ export default function BoardSection({
   projectMembers,
   memberMutationPhase,
   memberError,
+  memberLoadPhase,
+  memberLoadError,
   projectMutationPhase,
   projectMutationError,
+  permissions,
+  currentUserId,
   onSelectProject,
   onSelectTask,
   onCloseTask,
@@ -56,6 +61,11 @@ export default function BoardSection({
   const progress = activeTasks.length === 0
     ? 0
     : Math.round((completedCount / activeTasks.length) * 100);
+  const activeTaskPermissions = ticketPermissions({
+    projectRole: selectedProject?.currentUserRole,
+    task: selectedTask,
+    currentUserId,
+  });
 
   return (
     <section className="board-stage" aria-labelledby="board-title" aria-busy={loading}>
@@ -82,25 +92,28 @@ export default function BoardSection({
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
           </select>
-          <button
-            className="primary-action compact-action"
-            type="button"
-            aria-expanded={showTaskCreate}
-            disabled={loading || !selectedProject}
-            onClick={() => setShowTaskCreate((current) => !current)}
-          >
-            <span>Add ticket</span><span aria-hidden="true">＋</span>
-          </button>
+          {permissions.canCreateTask ? (
+            <button
+              className="primary-action compact-action"
+              type="button"
+              aria-expanded={showTaskCreate}
+              disabled={loading || !selectedProject}
+              onClick={() => setShowTaskCreate((current) => !current)}
+            >
+              <span>Add ticket</span><span aria-hidden="true">＋</span>
+            </button>
+          ) : null}
         </div>
       </header>
 
-      {showTaskCreate && selectedProject && !loading ? (
+      {showTaskCreate && selectedProject && !loading && permissions.canCreateTask ? (
         <TaskCreatePanel
           key={selectedProject.id}
           project={selectedProject}
           members={projectMembers}
           creating={taskMutationPhase === "creating"}
           error={taskError}
+          permissions={permissions}
           onCreate={onCreateTask}
           onCancel={() => setShowTaskCreate(false)}
         />
@@ -108,8 +121,10 @@ export default function BoardSection({
 
       {error ? (
         <div className="projects-error" role="alert">
-          <p>{error}</p>
-          <button className="text-action" type="button" onClick={onRetry}>Try again</button>
+          <p>{error.message}</p>
+          {error.retryable ? (
+            <button className="text-action" type="button" onClick={onRetry}>Try again</button>
+          ) : null}
         </div>
       ) : null}
 
@@ -138,18 +153,23 @@ export default function BoardSection({
           </section>
 
           <ProjectDesk
+            key={selectedProject.id}
             project={selectedProject}
             taskCount={activeTasks.length}
             members={projectMembers}
             memberMutationPhase={memberMutationPhase}
             memberError={memberError}
+            memberLoadPhase={memberLoadPhase}
+            memberLoadError={memberLoadError}
             mutationPhase={projectMutationPhase}
             error={projectMutationError}
+            permissions={permissions}
             onPlanFollowUp={onPlanFollowUp}
             onUpdateProject={onUpdateProject}
             onDeleteProject={onDeleteProject}
             onAddMember={onAddProjectMember}
             onRemoveMember={onRemoveProjectMember}
+            onRetryMembers={onRetry}
           />
 
           <div className="board-lanes" aria-label={`${selectedProject.name} ticket board`}>
@@ -206,6 +226,7 @@ export default function BoardSection({
           key={selectedTask.id}
           task={selectedTask}
           members={projectMembers}
+          permissions={activeTaskPermissions}
           saving={savingTask}
           deleting={taskMutationPhase === "deleting"}
           error={taskError}

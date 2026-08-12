@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
@@ -37,6 +36,8 @@ class ProjectGenerationRunRetryClaimServiceTest {
     private ProjectGenerationRunRepository runRepository;
     @Mock
     private ProjectPlanningContextService contextService;
+    @Mock
+    private ProjectAccessPolicy accessPolicy;
 
     private ProjectGenerationRunRetryClaimService service;
     private ProjectGenerationRun run;
@@ -44,7 +45,7 @@ class ProjectGenerationRunRetryClaimServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ProjectGenerationRunRetryClaimService(runRepository, contextService);
+        service = new ProjectGenerationRunRetryClaimService(runRepository, contextService, accessPolicy);
         owner = User.builder()
                 .id(7L)
                 .username("alice")
@@ -69,7 +70,7 @@ class ProjectGenerationRunRetryClaimServiceTest {
 
     @Test
     void claimsFailedRunAndClearsItsPreviousAttemptPayload() {
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
 
         ProjectGenerationRunRetryClaimService.RetryClaim claim = service.claim(
                 run.getId(),
@@ -102,7 +103,7 @@ class ProjectGenerationRunRetryClaimServiceTest {
         run.setProject(project);
         run.setTargetTask(target);
         run.setContextHash("a".repeat(64));
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         when(contextService.capture(20L, 201L, "alice")).thenReturn(
                 new ProjectPlanningContextService.CapturedContext(
                         project,
@@ -125,7 +126,7 @@ class ProjectGenerationRunRetryClaimServiceTest {
     void allowsAnAbandonedProcessingRunButRejectsAnActiveOne() {
         run.setStatus(ProjectGenerationStatus.PROCESSING);
         run.setUpdatedAt(LocalDateTime.now().minusMinutes(3));
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
 
         ProjectGenerationRunRetryClaimService.RetryClaim claim = service.claim(
                 run.getId(),
@@ -144,12 +145,16 @@ class ProjectGenerationRunRetryClaimServiceTest {
     }
 
     @Test
-    void rejectsAnotherUserAndACompletedDraft() {
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
-        assertThrows(AccessDeniedException.class, () -> service.claim(run.getId(), "mallory"));
+    void hidesPrivateRunsFromOtherUsersAndRejectsCompletedDraft() {
+        ResponseStatusException privateRunException = assertThrows(
+                ResponseStatusException.class,
+                () -> service.claim(run.getId(), "mallory")
+        );
+        assertEquals(404, privateRunException.getStatusCode().value());
         verify(runRepository, never()).save(run);
 
         run.setStatus(ProjectGenerationStatus.DRAFT_READY);
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         ResponseStatusException exception = assertThrows(
                 ResponseStatusException.class,
                 () -> service.claim(run.getId(), "alice")

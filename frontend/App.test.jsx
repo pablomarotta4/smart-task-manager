@@ -87,6 +87,7 @@ const savedProjects = [
     taskCount: 6,
     ownerId: 18,
     ownerUsername: "pablo-local",
+    currentUserRole: "OWNER",
     createdAt: "2026-08-09T23:57:01.424559",
   },
   {
@@ -96,6 +97,7 @@ const savedProjects = [
     taskCount: 6,
     ownerId: 18,
     ownerUsername: "pablo-local",
+    currentUserRole: "OWNER",
     createdAt: "2026-08-09T23:44:04.410638",
   },
 ];
@@ -193,6 +195,7 @@ const projectMembers = [
     username: "pablo-local",
     fullName: "Pablo Local Tester",
     owner: true,
+    role: "OWNER",
     joinedAt: "2026-08-09T12:00:00",
   },
   {
@@ -201,6 +204,7 @@ const projectMembers = [
     username: "bob",
     fullName: "Bob Builder",
     owner: false,
+    role: "MEMBER",
     joinedAt: "2026-08-10T12:00:00",
   },
 ];
@@ -282,6 +286,7 @@ const createClient = () => ({
     ...project,
     ownerId: 7,
     ownerUsername: "pablo-local",
+    currentUserRole: "OWNER",
     taskCount: 0,
     createdAt: "2026-08-11T12:00:00",
   })),
@@ -295,6 +300,7 @@ const createClient = () => ({
     username,
     fullName: "Carol Coordinator",
     owner: false,
+    role: "MEMBER",
     joinedAt: "2026-08-11T12:00:00",
   })),
   removeProjectMember: vi.fn().mockResolvedValue(null),
@@ -1253,6 +1259,277 @@ describe("AI project workshop", () => {
       projectId: 20,
     });
     expect(screen.queryByText("Job search command center")).not.toBeInTheDocument();
+  });
+
+  it("fails closed when a visible project has no recognized current role", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue(savedProjects.map((project) => ({
+      ...project,
+      currentUserRole: undefined,
+    })));
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(screen.queryByRole("button", { name: /add ticket/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /people/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plan next phase/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /project settings/i })).not.toBeInTheDocument();
+  });
+
+  it("gives managers ticket, ordinary-member, and AI controls but not project settings", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue(savedProjects.map((project) => ({
+      ...project,
+      currentUserRole: "MANAGER",
+    })));
+    client.getProjectMembers.mockResolvedValue([
+      {
+        userId: 1,
+        username: "alice",
+        fullName: "Alice Owner",
+        role: "OWNER",
+      },
+      {
+        userId: 18,
+        username: "pablo-local",
+        fullName: "Pablo Local Tester",
+        role: "MANAGER",
+      },
+      projectMembers[1],
+    ]);
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(screen.getByRole("button", { name: /add ticket/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /plan next phase/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /project settings/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    expect(screen.getByRole("button", { name: /remove bob builder/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove alice owner/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove pablo local tester/i }))
+      .not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    expect(within(panel).getByLabelText(/^priority$/i)).toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^assignee$/i)).toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^category$/i)).toBeEnabled();
+    expect(within(panel).getByLabelText(/^due date$/i)).toBeEnabled();
+    expect(within(panel).getByRole("button", { name: /delete ticket/i })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: /plan with ai/i })).toBeInTheDocument();
+  });
+
+  it("lets members edit only their assigned ticket without owner-controlled fields", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue(savedProjects.map((project) => ({
+      ...project,
+      currentUserRole: "MEMBER",
+    })));
+    client.getProjectTasks.mockResolvedValue([
+      { ...savedProjectTasks[0], assigneeId: 18, assigneeUsername: "pablo-local" },
+      savedProjectTasks[1],
+    ]);
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(screen.queryByRole("button", { name: /add ticket/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plan next phase/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /project settings/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    expect(screen.queryByLabelText(/participant username/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove bob builder/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    expect(within(panel).getByLabelText(/^title$/i)).toBeEnabled();
+    expect(within(panel).getByLabelText(/^status$/i)).toBeEnabled();
+    expect(within(panel).queryByLabelText(/^priority$/i)).not.toBeInTheDocument();
+    expect(within(panel).queryByLabelText(/^category$/i)).not.toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^due date$/i)).toBeDisabled();
+    expect(within(panel).queryByLabelText(/^assignee$/i)).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /delete ticket/i }))
+      .not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /plan with ai/i }))
+      .not.toBeInTheDocument();
+    await user.clear(within(panel).getByLabelText(/^title$/i));
+    await user.type(within(panel).getByLabelText(/^title$/i), "Refine opportunity intake");
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 201,
+      task: expect.objectContaining({
+        title: "Refine opportunity intake",
+        priority: "HIGH",
+        assigneeId: 18,
+        position: 0,
+      }),
+    });
+
+    await user.click(screen.getByRole("button", { name: /open track application stages/i }));
+    const readOnlyPanel = screen.getByRole("dialog", { name: /view track application stages/i });
+    expect(within(readOnlyPanel).getByLabelText(/^title$/i)).toHaveAttribute("readOnly");
+    expect(within(readOnlyPanel).queryByRole("button", { name: /save ticket/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps a forbidden ticket mutation inline without losing the draft", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.updateTask.mockRejectedValue(new ApiError("Forbidden", { status: 403 }));
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    const title = within(panel).getByLabelText(/^title$/i);
+    await user.clear(title);
+    await user.type(title, "Draft that must survive denial");
+
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+
+    expect(await within(panel).findByRole("alert")).toHaveTextContent(
+      "You do not have permission to change this ticket.",
+    );
+    expect(title).toHaveValue("Draft that must survive denial");
+    expect(within(panel).queryByRole("button", { name: /^try again$/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("preserves required owner-controlled fields when saving assigned work", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /my work/i }));
+    await user.click(await screen.findByRole("button", {
+      name: /open reconcile the inventory audit/i,
+    }));
+    const panel = screen.getByRole("dialog", { name: /edit reconcile the inventory audit/i });
+    const title = within(panel).getByLabelText(/^title$/i);
+    expect(within(panel).queryByLabelText(/^category$/i)).not.toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^due date$/i)).toBeDisabled();
+    await user.clear(title);
+    await user.type(title, "Reconcile the assigned audit");
+
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 303,
+      task: expect.objectContaining({
+        title: "Reconcile the assigned audit",
+        projectId: 19,
+        assigneeId: 18,
+        priority: "LOW",
+        category: "Inventory",
+        dueDate: "2000-01-01",
+        position: 2,
+      }),
+    });
+  });
+
+  it("fails closed when My Work returns a ticket no longer assigned to the current account", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getMyWork.mockResolvedValue([{
+      ...assignedWorkItems[0],
+      assigneeId: 999,
+      assigneeUsername: "another-user",
+    }]);
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /my work/i }));
+    await user.click(await screen.findByRole("button", {
+      name: /open track application stages/i,
+    }));
+
+    const panel = screen.getByRole("dialog");
+    expect(within(panel).getByLabelText(/^title$/i)).toHaveAttribute("readOnly");
+    expect(within(panel).getByLabelText(/^status$/i)).toBeDisabled();
+    expect(within(panel).queryByRole("button", { name: /save ticket/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps board tickets visible when participant loading is forbidden", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectMembers.mockRejectedValue(new ApiError("Forbidden", { status: 403 }));
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+
+    expect(await screen.findByText("Create opportunity intake")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "You do not have permission to view project participants.",
+    );
+    expect(screen.queryByRole("button", { name: /^try again$/i })).not.toBeInTheDocument();
+  });
+
+  it("offers participant retry only for a retryable load failure", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectMembers.mockRejectedValue(
+      new ApiError("Participants temporarily unavailable"),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    expect(await screen.findByText("Create opportunity intake")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Participants temporarily unavailable",
+    );
+    expect(screen.getByRole("button", { name: /^try again$/i })).toBeInTheDocument();
+  });
+
+  it("renders an honest non-retryable state when a selected project disappears", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectTasks.mockRejectedValue(
+      new ApiError("Project not found with id: 20", { status: 404 }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+    await user.click(await screen.findByRole("button", {
+      name: /job application tracker - initial backlog/i,
+    }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This project is no longer available.",
+    );
+    expect(screen.queryByText(/no tickets in this project/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^try again$/i })).not.toBeInTheDocument();
+  });
+
+  it("shows an explicit participant empty state", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectMembers.mockResolvedValue([]);
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+
+    expect(screen.getByText(/no participants are listed/i)).toBeInTheDocument();
   });
 
   it("shows the authenticated account and signs out from its dedicated view", async () => {

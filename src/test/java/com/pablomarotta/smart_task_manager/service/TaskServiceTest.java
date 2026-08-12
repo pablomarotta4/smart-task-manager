@@ -2,11 +2,14 @@ package com.pablomarotta.smart_task_manager.service;
 
 import com.pablomarotta.smart_task_manager.dto.TaskRequest;
 import com.pablomarotta.smart_task_manager.dto.TaskResponse;
+import com.pablomarotta.smart_task_manager.dto.ProjectMemberUserResponse;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.TaskNotFoundException;
 import com.pablomarotta.smart_task_manager.model.User;
 import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Project;
+import com.pablomarotta.smart_task_manager.model.ProjectMembership;
+import com.pablomarotta.smart_task_manager.model.ProjectRole;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.model.TaskAcceptanceCriterion;
@@ -18,6 +21,7 @@ import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -35,6 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -66,8 +73,46 @@ class TaskServiceTest {
     @Mock
     private TaskDependencyRepository dependencyRepository;
 
+    @Mock
+    private ProjectAccessPolicy accessPolicy;
+
     @InjectMocks
     private TaskService taskService;
+
+    @BeforeEach
+    void configureAccessPolicy() {
+        lenient().when(accessPolicy.requireMember(anyLong(), anyString()))
+                .thenAnswer(invocation -> membership(invocation.getArgument(1), ProjectRole.MEMBER));
+        lenient().when(accessPolicy.requireManager(anyLong(), anyString()))
+                .thenAnswer(invocation -> {
+                    String username = invocation.getArgument(1);
+                    if (!OWNER_USERNAME.equals(username)) {
+                        throw new org.springframework.security.access.AccessDeniedException(
+                                "Project manager permission is required"
+                        );
+                    }
+                    return membership(username, ProjectRole.OWNER);
+                });
+        lenient().when(accessPolicy.requireTaskViewer(anyLong(), anyString()))
+                .thenAnswer(invocation -> findTaskFor(invocation.getArgument(0), invocation.getArgument(1)));
+        lenient().when(accessPolicy.requireTaskEditor(anyLong(), anyString()))
+                .thenAnswer(invocation -> {
+                    Long taskId = invocation.getArgument(0);
+                    String username = invocation.getArgument(1);
+                    Task task = findTaskFor(taskId, username);
+                    ProjectMembership membership = membership(
+                            username,
+                            OWNER_USERNAME.equals(username) ? ProjectRole.OWNER : ProjectRole.MEMBER
+                    );
+                    if (membership.getRole() == ProjectRole.MEMBER
+                            && (task.getAssignee() == null || !username.equals(task.getAssignee().getUsername()))) {
+                        throw new org.springframework.security.access.AccessDeniedException(
+                                "Members can edit only their assigned tasks"
+                        );
+                    }
+                    return new ProjectAccessPolicy.TaskAccess(task, membership);
+                });
+    }
 
     @Test
     void getTasksByProjectIdReturnsOrderedPlanningDetails() {
@@ -91,8 +136,6 @@ class TaskServiceTest {
                 .dependsOnTask(discoverJobs)
                 .build();
 
-        when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))
-                .thenReturn(Optional.of(project));
         when(taskRepository.findByProjectIdOrderByPositionAsc(20L))
                 .thenReturn(List.of(discoverJobs, trackApplications));
         when(acceptanceCriterionRepository.findByProjectId(20L))
@@ -117,8 +160,8 @@ class TaskServiceTest {
 
     @Test
     void getTasksByProjectIdRejectsForeignProjectBeforeLoadingBacklog() {
-        when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))
-                .thenReturn(Optional.empty());
+        when(accessPolicy.requireMember(20L, OWNER_USERNAME))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 20"));
 
         assertThrows(
                 ProjectNotFoundException.class,
@@ -172,8 +215,8 @@ class TaskServiceTest {
     @Test
     void createTaskRejectsForeignProjectBeforeCallingAi() {
         TaskRequest request = taskRequest();
-        when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))
-                .thenReturn(Optional.empty());
+        when(accessPolicy.requireManager(20L, OWNER_USERNAME))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 20"));
 
         assertThrows(
                 ProjectNotFoundException.class,
@@ -189,8 +232,6 @@ class TaskServiceTest {
         Project project = ownedProject();
         TaskRequest request = taskRequest();
         request.setPosition(null);
-        when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))
-                .thenReturn(Optional.of(project));
         when(taskRepository.countByProjectId(20L)).thenReturn(2L);
         when(taskRepository.save(any(Task.class))).thenAnswer(invocation -> {
             Task saved = invocation.getArgument(0);
@@ -203,7 +244,7 @@ class TaskServiceTest {
         assertEquals(103L, response.getId());
         assertEquals(2, response.getPosition());
         verify(taskRepository).save(org.mockito.ArgumentMatchers.argThat(saved ->
-                saved.getCreatedBy() == project.getOwner()
+                OWNER_USERNAME.equals(saved.getCreatedBy().getUsername())
                         && saved.getPosition() == 2
                         && saved.getAiSummary() == null
                         && saved.getAiPriority() == null
@@ -217,8 +258,6 @@ class TaskServiceTest {
         User outsider = User.builder().id(2L).username("mallory").active(true).build();
         TaskRequest request = taskRequest();
         request.setAssigneeId(2L);
-        when(projectRepository.findByIdAndOwnerUsername(20L, OWNER_USERNAME))
-                .thenReturn(Optional.of(project));
         when(userRepository.findById(2L)).thenReturn(Optional.of(outsider));
         when(membershipRepository.existsByProjectIdAndUserId(20L, 2L)).thenReturn(false);
 
@@ -334,7 +373,6 @@ class TaskServiceTest {
                 () -> taskService.deleteTask(101L, "bob")
         );
 
-        verify(taskRepository, never()).findByIdAndAssigneeUsername(any(), any());
         verify(taskRepository, never()).delete(any());
     }
 
@@ -435,6 +473,9 @@ class TaskServiceTest {
         TaskRequest request = taskRequest();
         request.setAssigneeId(2L);
         request.setTitle("Contributor update");
+        request.setPosition(1);
+        request.setDueDate(existing.getDueDate());
+        request.setCategory(existing.getCategory());
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob")).thenReturn(Optional.empty());
         when(taskRepository.findByIdAndAssigneeUsername(101L, "bob")).thenReturn(Optional.of(existing));
         when(taskRepository.save(existing)).thenReturn(existing);
@@ -484,6 +525,80 @@ class TaskServiceTest {
     }
 
     @Test
+    void assignedContributorCannotChangeDueDateThroughWholeTaskUpdate() {
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        existing.setAssignee(member);
+        LocalDate originalDueDate = existing.getDueDate();
+        String originalCategory = existing.getCategory();
+        TaskRequest request = taskRequest();
+        request.setAssigneeId(member.getId());
+        request.setPriority(existing.getPriority());
+        request.setPosition(existing.getPosition());
+        request.setDueDate(originalDueDate.plusDays(1));
+        request.setCategory(originalCategory);
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob")).thenReturn(Optional.empty());
+        when(taskRepository.findByIdAndAssigneeUsername(101L, "bob")).thenReturn(Optional.of(existing));
+
+        assertThrows(
+                org.springframework.security.access.AccessDeniedException.class,
+                () -> taskService.updateTask(101L, request, "bob")
+        );
+
+        assertEquals(originalDueDate, existing.getDueDate());
+        assertEquals(originalCategory, existing.getCategory());
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void assignedContributorCannotChangeCategoryThroughWholeTaskUpdate() {
+        User member = User.builder().id(2L).username("bob").active(true).build();
+        Task existing = task(101L, ownedProject(), null, "Existing ticket", 1);
+        existing.setAssignee(member);
+        LocalDate originalDueDate = existing.getDueDate();
+        String originalCategory = existing.getCategory();
+        TaskRequest request = taskRequest();
+        request.setAssigneeId(member.getId());
+        request.setPriority(existing.getPriority());
+        request.setPosition(existing.getPosition());
+        request.setDueDate(originalDueDate);
+        request.setCategory("Different category");
+        when(taskRepository.findByIdAndProjectOwnerUsername(101L, "bob")).thenReturn(Optional.empty());
+        when(taskRepository.findByIdAndAssigneeUsername(101L, "bob")).thenReturn(Optional.of(existing));
+
+        assertThrows(
+                org.springframework.security.access.AccessDeniedException.class,
+                () -> taskService.updateTask(101L, request, "bob")
+        );
+
+        assertEquals(originalDueDate, existing.getDueDate());
+        assertEquals(originalCategory, existing.getCategory());
+        verify(taskRepository, never()).save(any());
+    }
+
+    @Test
+    void projectMemberDirectoryDoesNotExposeEmail() {
+        User member = User.builder()
+                .id(2L)
+                .username("bob")
+                .email("bob@example.com")
+                .fullName("Bob Member")
+                .active(true)
+                .build();
+        when(membershipRepository.findByProjectIdOrderByJoinedAtAsc(20L))
+                .thenReturn(List.of(ProjectMembership.builder()
+                        .project(ownedProject())
+                        .user(member)
+                        .role(ProjectRole.MEMBER)
+                        .build()));
+
+        List<ProjectMemberUserResponse> response = taskService.getAllUsersInProject(20L, OWNER_USERNAME);
+
+        assertEquals("bob", response.getFirst().username());
+        assertEquals("Bob Member", response.getFirst().fullName());
+    }
+
+    @Test
     void priorityMutationRejectsForeignTask() {
         when(taskRepository.findByIdAndProjectOwnerUsername(101L, OWNER_USERNAME))
                 .thenReturn(Optional.empty());
@@ -497,14 +612,33 @@ class TaskServiceTest {
     }
 
     @Test
-    void todoQueryUsesOwnerScopedRepositoryMethod() {
-        when(taskRepository.findByStatusAndProjectOwnerUsername(Status.TODO, OWNER_USERNAME))
+    void todoQueryUsesMembershipScopedRepositoryMethod() {
+        when(taskRepository.findVisibleByStatusAndUsername(Status.TODO, OWNER_USERNAME))
                 .thenReturn(List.of());
 
         assertEquals(List.of(), taskService.getTodoTasks(OWNER_USERNAME));
 
-        verify(taskRepository).findByStatusAndProjectOwnerUsername(Status.TODO, OWNER_USERNAME);
+        verify(taskRepository).findVisibleByStatusAndUsername(Status.TODO, OWNER_USERNAME);
         verify(taskRepository, never()).findByStatus(Status.TODO);
+    }
+
+    private Task findTaskFor(Long taskId, String username) {
+        return taskRepository.findByIdAndProjectOwnerUsername(taskId, username)
+                .or(() -> taskRepository.findByIdAndAssigneeUsername(taskId, username))
+                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
+    }
+
+    private ProjectMembership membership(String username, ProjectRole role) {
+        User user = User.builder()
+                .id(OWNER_USERNAME.equals(username) ? 1L : 2L)
+                .username(username)
+                .active(true)
+                .build();
+        return ProjectMembership.builder()
+                .project(ownedProject())
+                .user(user)
+                .role(role)
+                .build();
     }
 
     private Project ownedProject() {

@@ -1,13 +1,10 @@
 package com.pablomarotta.smart_task_manager.service;
 
 import com.pablomarotta.smart_task_manager.dto.*;
-import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
-import com.pablomarotta.smart_task_manager.exception.TaskNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
-import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
@@ -25,7 +22,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,10 +33,10 @@ public class TaskService {
 
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
-    private final ProjectRepository projectRepository;
     private final ProjectMembershipRepository membershipRepository;
     private final TaskAcceptanceCriterionRepository acceptanceCriterionRepository;
     private final TaskDependencyRepository dependencyRepository;
+    private final ProjectAccessPolicy accessPolicy;
 
     @Transactional
     public TaskResponse createTask(TaskRequest taskRequest, String username) {
@@ -53,16 +49,18 @@ public class TaskService {
         }
         
         try {
-            var project = projectRepository.findByIdAndOwnerUsername(taskRequest.getProjectId(), username)
-                    .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + taskRequest.getProjectId()));
-
-            var taskBuilder = Task.builder()
+            com.pablomarotta.smart_task_manager.model.ProjectMembership requester = accessPolicy.requireManager(
+                    taskRequest.getProjectId(),
+                    username
+            );
+            com.pablomarotta.smart_task_manager.model.Project project = requester.getProject();
+            Task.TaskBuilder taskBuilder = Task.builder()
                     .id(null)
                     .title(validateTitle(taskRequest.getTitle()))
                     .description(normalizeOptionalText(taskRequest.getDescription()))
                     .status(taskRequest.getStatus() != null ? taskRequest.getStatus() : Status.TODO)
                     .project(project)
-                    .createdBy(project.getOwner())
+                    .createdBy(requester.getUser())
                     .priority(taskRequest.getPriority())
                     .category(normalizeOptionalText(taskRequest.getCategory()))
                     .dueDate(validateDueDate(taskRequest.getDueDate()))
@@ -77,15 +75,12 @@ public class TaskService {
             Task task = taskBuilder.build();
             Task savedTask = taskRepository.save(task);
             return mapToResponse(savedTask);
-            
-        } catch (ProjectNotFoundException | UserNotFoundException | IllegalArgumentException e) {
+        } catch (UserNotFoundException | IllegalArgumentException e) {
             throw e;
         } catch (DataIntegrityViolationException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Data integrity violation: " + e.getMessage(), e);
         } catch (TransactionSystemException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Transaction failed: " + e.getMostSpecificCause().getMessage(), e);
-        } catch (Exception e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create task: " + e.getMessage(), e);
         }
     }
 
@@ -124,8 +119,9 @@ public class TaskService {
         return taskResponse;
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getAllTasks(String username) {
-        return taskRepository.findByProjectOwnerUsername(username).stream()
+        return taskRepository.findVisibleToUsername(username).stream()
                 .map(this::mapToResponse)
                 .toList();
     }
@@ -163,31 +159,23 @@ public class TaskService {
                 .toList();
     }
 
-    public List<UserResponse> getAllUsersInProject(Long projectId, String username) {
-        var project = getOwnedProject(projectId, username);
-        Map<Long, com.pablomarotta.smart_task_manager.model.User> projectUsers = new LinkedHashMap<>();
-        projectUsers.put(project.getOwner().getId(), project.getOwner());
-        taskRepository.findByProjectIdOrderByPositionAsc(projectId).stream()
-                .map(Task::getAssignee)
-                .filter(assignee -> assignee != null)
-                .forEach(assignee -> projectUsers.putIfAbsent(assignee.getId(), assignee));
-
-        return projectUsers.values().stream()
-                .map(this::mapUserToResponse)
+    @Transactional(readOnly = true)
+    public List<ProjectMemberUserResponse> getAllUsersInProject(Long projectId, String username) {
+        accessPolicy.requireMember(projectId, username);
+        return membershipRepository.findByProjectIdOrderByJoinedAtAsc(projectId).stream()
+                .map(membership -> mapUserToResponse(membership.getUser()))
                 .toList();
     }
 
-    private UserResponse mapUserToResponse(com.pablomarotta.smart_task_manager.model.User user) {
-        UserResponse userResponse = new UserResponse();
-        userResponse.setId(user.getId());
-        userResponse.setUsername(user.getUsername());
-        userResponse.setEmail(user.getEmail());
-        return userResponse;
+    private ProjectMemberUserResponse mapUserToResponse(
+            com.pablomarotta.smart_task_manager.model.User user
+    ) {
+        return new ProjectMemberUserResponse(user.getId(), user.getUsername(), user.getFullName());
     }
 
     @Transactional(readOnly = true)
     public List<TaskResponse> getTasksByProjectId(Long projectId, String username) {
-        getOwnedProject(projectId, username);
+        accessPolicy.requireMember(projectId, username);
 
         Map<Long, List<String>> acceptanceCriteria = acceptanceCriterionRepository
                 .findByProjectId(projectId)
@@ -233,41 +221,47 @@ public class TaskService {
         return response;
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getTasksByUserId(Long userId, String username) {
-        return taskRepository.findByAssigneeIdAndProjectOwnerUsername(userId, username).stream()
+        return taskRepository.findVisibleByAssigneeIdAndUsername(userId, username).stream()
                 .map(this::mapToResponse)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getInProgressTask(String username){
         return getTasksByStatus(Status.IN_PROGRESS, username);
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getTodoTasks(String username){
         return getTasksByStatus(Status.TODO, username);
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getDoneTasks(String username){
         return getTasksByStatus(Status.DONE, username);
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getBlockedTasks(String username){
         return getTasksByStatus(Status.BLOCKED, username);
     }
 
+    @Transactional(readOnly = true)
     public List<TaskResponse> getCancelledTasks(String username){
         return getTasksByStatus(Status.CANCELLED, username);
     }
 
     private List<TaskResponse> getTasksByStatus(Status status, String username) {
-        return taskRepository.findByStatusAndProjectOwnerUsername(status, username).stream()
+        return taskRepository.findVisibleByStatusAndUsername(status, username).stream()
                 .map(this::mapToResponse)
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public TaskResponse getTaskById(Long id, String username) {
-        Task task = getEditableTask(id, username);
+        Task task = accessPolicy.requireTaskViewer(id, username);
         return mapToResponse(task);
     }
 
@@ -281,11 +275,12 @@ public class TaskService {
         }
         
         try {
-            Task task = getEditableTask(id, username);
+            ProjectAccessPolicy.TaskAccess taskAccess = accessPolicy.requireTaskEditor(id, username);
+            Task task = taskAccess.task();
             if (!task.getProject().getId().equals(taskRequest.getProjectId())) {
                 throw new IllegalArgumentException("Task cannot be moved to another project");
             }
-            assertContributorKeepsOwnerControlledFields(task, taskRequest, username);
+            assertMemberKeepsOwnerControlledFields(task, taskRequest, taskAccess.membership());
 
             task.setTitle(validateTitle(taskRequest.getTitle()));
             task.setDescription(normalizeOptionalText(taskRequest.getDescription()));
@@ -293,7 +288,7 @@ public class TaskService {
             applyStatus(task, taskRequest.getStatus());
             task.setPriority(taskRequest.getPriority());
             task.setCategory(normalizeOptionalText(taskRequest.getCategory()));
-            applyAssignment(task, taskRequest.getAssigneeId(), username);
+            applyAssignment(task, taskRequest.getAssigneeId(), taskAccess.membership());
             if (taskRequest.getPosition() != null) {
                 task.setPosition(validatePosition(taskRequest.getPosition()));
             }
@@ -313,7 +308,8 @@ public class TaskService {
         }
         
         try {
-            Task task = getOwnedTask(id, username);
+            Task task = accessPolicy.requireTaskViewer(id, username);
+            accessPolicy.requireManager(task.getProject().getId(), username);
             taskRepository.delete(task);
         } catch (DataAccessException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to delete task: " + e.getMessage(), e);
@@ -330,7 +326,7 @@ public class TaskService {
         }
         
         try {
-            Task task = getEditableTask(id, username);
+            Task task = accessPolicy.requireTaskEditor(id, username).task();
 
             applyStatus(task, status);
 
@@ -349,7 +345,8 @@ public class TaskService {
         }
         
         try {
-            Task task = getOwnedTask(taskId, username);
+            Task task = accessPolicy.requireTaskViewer(taskId, username);
+            accessPolicy.requireManager(task.getProject().getId(), username);
 
             if (userId != null) {
                 task.setAssignee(getActiveProjectMember(task.getProject().getId(), userId));
@@ -375,7 +372,8 @@ public class TaskService {
         }
         
         try {
-            Task task = getOwnedTask(id, username);
+            Task task = accessPolicy.requireTaskViewer(id, username);
+            accessPolicy.requireManager(task.getProject().getId(), username);
 
             task.setPriority(priority);
             Task updatedTask = taskRepository.save(task);
@@ -386,28 +384,16 @@ public class TaskService {
         }
     }
 
-    private com.pablomarotta.smart_task_manager.model.Project getOwnedProject(Long projectId, String username) {
-        return projectRepository.findByIdAndOwnerUsername(projectId, username)
-                .orElseThrow(() -> new ProjectNotFoundException("Project not found with id: " + projectId));
-    }
-
-    private Task getOwnedTask(Long taskId, String username) {
-        return taskRepository.findByIdAndProjectOwnerUsername(taskId, username)
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
-    }
-
-    private Task getEditableTask(Long taskId, String username) {
-        return taskRepository.findByIdAndProjectOwnerUsername(taskId, username)
-                .or(() -> taskRepository.findByIdAndAssigneeUsername(taskId, username))
-                .orElseThrow(() -> new TaskNotFoundException("Task not found with id: " + taskId));
-    }
-
-    private void applyAssignment(Task task, Long assigneeId, String username) {
-        boolean owner = task.getProject().getOwner().getUsername().equals(username);
+    private void applyAssignment(
+            Task task,
+            Long assigneeId,
+            com.pablomarotta.smart_task_manager.model.ProjectMembership membership
+    ) {
+        boolean manager = membership.getRole().canManageProject();
         Long currentAssigneeId = task.getAssignee() == null ? null : task.getAssignee().getId();
-        if (!owner) {
+        if (!manager) {
             if (!Objects.equals(currentAssigneeId, assigneeId)) {
-                throw new AccessDeniedException("Only the project owner can change task assignment");
+                throw new AccessDeniedException("Only project managers can change task assignment");
             }
             return;
         }
@@ -416,20 +402,32 @@ public class TaskService {
                 : getActiveProjectMember(task.getProject().getId(), assigneeId));
     }
 
-    private void assertContributorKeepsOwnerControlledFields(
+    private void assertMemberKeepsOwnerControlledFields(
             Task task,
             TaskRequest request,
-            String username
+            com.pablomarotta.smart_task_manager.model.ProjectMembership membership
     ) {
-        if (task.getProject().getOwner().getUsername().equals(username)) {
+        if (membership.getRole().canManageProject()) {
             return;
         }
         Long currentAssigneeId = task.getAssignee() == null ? null : task.getAssignee().getId();
         if (!Objects.equals(currentAssigneeId, request.getAssigneeId())) {
-            throw new AccessDeniedException("Only the project owner can change task assignment");
+            throw new AccessDeniedException("Only project managers can change task assignment");
         }
         if (!Objects.equals(task.getPriority(), request.getPriority())) {
-            throw new AccessDeniedException("Only the project owner can change task priority");
+            throw new AccessDeniedException("Only project managers can change task priority");
+        }
+        if (request.getPosition() != null && !Objects.equals(task.getPosition(), request.getPosition())) {
+            throw new AccessDeniedException("Only project managers can change task position");
+        }
+        if (!Objects.equals(task.getDueDate(), request.getDueDate())) {
+            throw new AccessDeniedException("Only project managers can change task due date");
+        }
+        if (!Objects.equals(
+                normalizeOptionalText(task.getCategory()),
+                normalizeOptionalText(request.getCategory())
+        )) {
+            throw new AccessDeniedException("Only project managers can change task category");
         }
     }
 

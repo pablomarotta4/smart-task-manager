@@ -25,6 +25,11 @@ public interface TaskDependencyRepository extends JpaRepository<TaskDependency, 
             join fetch dependency.task task
             join fetch dependency.dependsOnTask dependsOnTask
             where task.assignee.username = :username
+              and exists (
+                  select membership.id from ProjectMembership membership
+                  where membership.project = task.project
+                    and membership.user.username = :username
+              )
             order by task.dueDate, task.position, dependsOnTask.position
             """)
     List<TaskDependency> findByTaskAssigneeUsername(@Param("username") String username);

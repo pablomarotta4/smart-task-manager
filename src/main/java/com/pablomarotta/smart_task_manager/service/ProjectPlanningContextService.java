@@ -5,14 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pablomarotta.smart_task_manager.dto.planning.AIPlanningContext;
 import com.pablomarotta.smart_task_manager.dto.planning.PlanningProjectSnapshot;
 import com.pablomarotta.smart_task_manager.dto.planning.PlanningTaskSnapshot;
-import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.TaskNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
 import com.pablomarotta.smart_task_manager.model.ProjectGenerationMode;
 import com.pablomarotta.smart_task_manager.model.Task;
 import com.pablomarotta.smart_task_manager.model.TaskAcceptanceCriterion;
 import com.pablomarotta.smart_task_manager.model.TaskDependency;
-import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskAcceptanceCriterionRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskDependencyRepository;
 import com.pablomarotta.smart_task_manager.repository.TaskRepository;
@@ -31,18 +29,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProjectPlanningContextService {
 
-    private final ProjectRepository projectRepository;
     private final TaskRepository taskRepository;
     private final TaskAcceptanceCriterionRepository criterionRepository;
     private final TaskDependencyRepository dependencyRepository;
     private final ObjectMapper objectMapper;
+    private final ProjectAccessPolicy accessPolicy;
 
     @Transactional(readOnly = true)
     public CapturedContext capture(Long projectId, Long taskId, String username) {
-        Project project = projectRepository.findByIdAndOwnerUsername(projectId, username)
-                .orElseThrow(() -> new ProjectNotFoundException(
-                        "Project not found with id: " + projectId
-                ));
+        Project project = accessPolicy.requireManager(projectId, username).getProject();
         List<Task> tasks = taskRepository.findByProjectIdOrderByPositionAsc(projectId);
         Task targetTask = tasks.stream()
                 .filter(task -> task.getId().equals(taskId))

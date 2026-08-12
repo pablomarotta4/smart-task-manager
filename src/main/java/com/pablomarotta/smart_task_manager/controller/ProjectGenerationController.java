@@ -10,6 +10,7 @@ import com.pablomarotta.smart_task_manager.service.ProjectGenerationConfirmation
 import com.pablomarotta.smart_task_manager.service.ProjectGenerationRunQueryService;
 import com.pablomarotta.smart_task_manager.service.ProjectGenerationService;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -26,20 +27,11 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/project-generation-runs")
+@RequiredArgsConstructor
 public class ProjectGenerationController {
     private final ProjectGenerationService generationService;
     private final ProjectGenerationConfirmationService confirmationService;
     private final ProjectGenerationRunQueryService queryService;
-
-    public ProjectGenerationController(
-            ProjectGenerationService generationService,
-            ProjectGenerationConfirmationService confirmationService,
-            ProjectGenerationRunQueryService queryService
-    ) {
-        this.generationService = generationService;
-        this.confirmationService = confirmationService;
-        this.queryService = queryService;
-    }
 
     @GetMapping
     public List<ProjectGenerationRunSummaryResponse> list(Authentication authentication) {

@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.ArrayList;
@@ -55,6 +54,8 @@ class ProjectGenerationConfirmationServiceTest {
     private ProjectMembershipRepository membershipRepository;
     @Mock
     private ProjectPlanningContextService contextService;
+    @Mock
+    private ProjectAccessPolicy accessPolicy;
 
     private ProjectGenerationConfirmationService service;
     private ProjectGenerationRun run;
@@ -69,7 +70,8 @@ class ProjectGenerationConfirmationServiceTest {
                 dependencyRepository,
                 membershipRepository,
                 contextService,
-                new ObjectMapper().findAndRegisterModules()
+                new ObjectMapper().findAndRegisterModules(),
+                accessPolicy
         );
         User owner = User.builder().id(7L).username("alice").email("alice@example.com")
                 .password("encoded").fullName("Alice").build();
@@ -84,7 +86,7 @@ class ProjectGenerationConfirmationServiceTest {
 
     @Test
     void confirmAtomicallyCreatesProjectTicketsCriteriaAndDependencies() {
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> {
             Project project = invocation.getArgument(0);
             project.setId(41L);
@@ -129,7 +131,7 @@ class ProjectGenerationConfirmationServiceTest {
         Project project = Project.builder().id(41L).name("Budget App").owner(run.getRequestedBy()).build();
         run.setStatus(ProjectGenerationStatus.CONFIRMED);
         run.setProject(project);
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         when(taskRepository.findByGenerationRunIdOrderByPositionAsc(run.getId())).thenReturn(List.of(
                 Task.builder().id(100L).project(project).title("One").build(),
                 Task.builder().id(101L).project(project).title("Two").build()
@@ -146,20 +148,19 @@ class ProjectGenerationConfirmationServiceTest {
     }
 
     @Test
-    void onlyRunOwnerCanConfirm() {
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
-
-        assertThrows(
-                AccessDeniedException.class,
+    void otherUsersCannotDiscoverPrivateRunConfirmation() {
+        ResponseStatusException exception = assertThrows(
+                ResponseStatusException.class,
                 () -> service.confirm(run.getId(), "mallory", PlanningTestFixtures.draft())
         );
 
+        assertEquals(404, exception.getStatusCode().value());
         verify(projectRepository, never()).save(any());
     }
 
     @Test
     void invalidDependencyIsRejectedBeforeAnyWrite() {
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         ProjectPlanDraft original = PlanningTestFixtures.draft();
         var first = original.tickets().getFirst();
         var invalidFirst = new com.pablomarotta.smart_task_manager.dto.planning.PlanningTicketDraft(
@@ -183,7 +184,7 @@ class ProjectGenerationConfirmationServiceTest {
 
     @Test
     void failedTaskPersistenceDoesNotMarkRunConfirmed() {
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(taskRepository.saveAll(any())).thenThrow(new IllegalStateException("database failure"));
 
@@ -215,7 +216,7 @@ class ProjectGenerationConfirmationServiceTest {
         run.setProject(project);
         run.setTargetTask(target);
         run.setContextHash("a".repeat(64));
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         when(contextService.capture(20L, 201L, "alice")).thenReturn(
                 new ProjectPlanningContextService.CapturedContext(
                         project,
@@ -270,7 +271,7 @@ class ProjectGenerationConfirmationServiceTest {
         run.setProject(project);
         run.setTargetTask(target);
         run.setContextHash("a".repeat(64));
-        when(runRepository.findLockedById(run.getId())).thenReturn(Optional.of(run));
+        when(runRepository.findLockedByIdAndRequestedByUsername(run.getId(), "alice")).thenReturn(Optional.of(run));
         when(contextService.capture(20L, 201L, "alice")).thenReturn(
                 new ProjectPlanningContextService.CapturedContext(
                         project,

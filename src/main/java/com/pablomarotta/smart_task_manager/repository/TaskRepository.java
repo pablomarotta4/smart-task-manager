@@ -3,6 +3,7 @@ package com.pablomarotta.smart_task_manager.repository;
 import com.pablomarotta.smart_task_manager.model.Priority;
 import com.pablomarotta.smart_task_manager.model.Status;
 import com.pablomarotta.smart_task_manager.model.Task;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Modifying;
@@ -25,13 +26,66 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
 
     List<Task> findByProjectId(Long projectId);
 
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "parentTask"})
     List<Task> findByProjectIdOrderByPositionAsc(Long projectId);
+
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "parentTask"})
+    @Query("""
+            select task from Task task
+            where exists (
+                select membership.id from ProjectMembership membership
+                where membership.project = task.project
+                  and membership.user.username = :username
+            )
+            """)
+    List<Task> findVisibleToUsername(@Param("username") String username);
+
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "parentTask"})
+    @Query("""
+            select task from Task task
+            where task.status = :status
+              and exists (
+                  select membership.id from ProjectMembership membership
+                  where membership.project = task.project
+                    and membership.user.username = :username
+              )
+            """)
+    List<Task> findVisibleByStatusAndUsername(
+            @Param("status") Status status,
+            @Param("username") String username
+    );
+
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "parentTask"})
+    @Query("""
+            select task from Task task
+            where task.assignee.id = :userId
+              and exists (
+                  select membership.id from ProjectMembership membership
+                  where membership.project = task.project
+                    and membership.user.username = :username
+              )
+            """)
+    List<Task> findVisibleByAssigneeIdAndUsername(
+            @Param("userId") Long userId,
+            @Param("username") String username
+    );
 
     List<Task> findByAssigneeId(Long assigneeId);
 
     List<Task> findByAssigneeIdAndProjectOwnerUsername(Long assigneeId, String username);
 
-    List<Task> findByAssigneeUsernameOrderByDueDateAscPositionAsc(String username);
+    @EntityGraph(attributePaths = {"project", "assignee", "createdBy", "parentTask"})
+    @Query("""
+            select task from Task task
+            where task.assignee.username = :username
+              and exists (
+                  select membership.id from ProjectMembership membership
+                  where membership.project = task.project
+                    and membership.user.username = :username
+              )
+            order by task.dueDate asc, task.position asc
+            """)
+    List<Task> findByAssigneeUsernameOrderByDueDateAscPositionAsc(@Param("username") String username);
 
     List<Task> findByStatus(Status status);
 
@@ -80,4 +134,16 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
             group by task.project.id
             """)
     List<ProjectTaskCount> countTasksByProjectOwnerUsername(@Param("username") String username);
+
+    @Query("""
+            select task.project.id as projectId, count(task.id) as taskCount
+            from Task task
+            where exists (
+                select membership.id from ProjectMembership membership
+                where membership.project = task.project
+                  and membership.user.username = :username
+            )
+            group by task.project.id
+            """)
+    List<ProjectTaskCount> countTasksByProjectMemberUsername(@Param("username") String username);
 }

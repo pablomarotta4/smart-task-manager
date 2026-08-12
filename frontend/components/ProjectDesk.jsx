@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
 
+import { canRemoveProjectMember } from "../lib/projectPermissions";
+
 export default function ProjectDesk({
   project,
   taskCount,
   members,
   memberMutationPhase,
   memberError,
+  memberLoadPhase,
+  memberLoadError,
   mutationPhase,
   error,
+  permissions,
   onPlanFollowUp,
   onUpdateProject,
   onDeleteProject,
   onAddMember,
   onRemoveMember,
+  onRetryMembers,
 }) {
   const [openPanel, setOpenPanel] = useState(null);
   const [draft, setDraft] = useState({
@@ -30,6 +36,10 @@ export default function ProjectDesk({
     setMemberPendingRemoval(null);
   }, [project.id, project.name, project.objective]);
 
+  useEffect(() => {
+    setOpenPanel(null);
+  }, [permissions.role, project.id]);
+
   const togglePanel = (panel) => {
     setOpenPanel((current) => current === panel ? null : panel);
     setConfirmingDelete(false);
@@ -38,7 +48,7 @@ export default function ProjectDesk({
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    onUpdateProject(project, {
+    onUpdateProject(project.id, {
       name: draft.name.trim(),
       objective: draft.objective.trim() || null,
     });
@@ -46,12 +56,12 @@ export default function ProjectDesk({
 
   const handleAddMember = async (event) => {
     event.preventDefault();
-    const added = await onAddMember(participantUsername.trim());
+    const added = await onAddMember(project.id, participantUsername.trim());
     if (added) setParticipantUsername("");
   };
 
   const handleRemoveMember = async () => {
-    const removed = await onRemoveMember(memberPendingRemoval);
+    const removed = await onRemoveMember(project.id, memberPendingRemoval);
     if (removed) setMemberPendingRemoval(null);
   };
 
@@ -63,30 +73,36 @@ export default function ProjectDesk({
           <h2 id="project-desk-title">Context before action</h2>
         </div>
         <div className="project-desk-actions">
-          <button
-            className="text-action"
-            type="button"
-            aria-expanded={openPanel === "people"}
-            onClick={() => togglePanel("people")}
-          >
-            People
-          </button>
-          <button
-            className="text-action"
-            type="button"
-            aria-expanded={openPanel === "planning"}
-            onClick={() => togglePanel("planning")}
-          >
-            Plan next phase
-          </button>
-          <button
-            className="text-action"
-            type="button"
-            aria-expanded={openPanel === "settings"}
-            onClick={() => togglePanel("settings")}
-          >
-            Project settings
-          </button>
+          {permissions.canViewMembers ? (
+            <button
+              className="text-action"
+              type="button"
+              aria-expanded={openPanel === "people"}
+              onClick={() => togglePanel("people")}
+            >
+              People
+            </button>
+          ) : null}
+          {permissions.canPlanProject ? (
+            <button
+              className="text-action"
+              type="button"
+              aria-expanded={openPanel === "planning"}
+              onClick={() => togglePanel("planning")}
+            >
+              Plan next phase
+            </button>
+          ) : null}
+          {permissions.canEditProject || permissions.canDeleteProject ? (
+            <button
+              className="text-action"
+              type="button"
+              aria-expanded={openPanel === "settings"}
+              onClick={() => togglePanel("settings")}
+            >
+              Project settings
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -145,7 +161,7 @@ export default function ProjectDesk({
               <span>Tickets</span>
               <strong>{taskCount}</strong>
             </div>
-            {error ? <p className="project-mutation-error" role="alert">{error}</p> : null}
+            {error ? <p className="project-mutation-error" role="alert">{error.message}</p> : null}
             <div className="project-settings-actions">
               <button
                 className="primary-action compact-action"
@@ -184,7 +200,7 @@ export default function ProjectDesk({
                   className="danger-action is-confirm"
                   type="button"
                   disabled={mutationPhase === "deleting"}
-                  onClick={() => onDeleteProject(project)}
+                  onClick={() => onDeleteProject(project.id)}
                 >
                   {mutationPhase === "deleting" ? "Deleting project…" : "Yes, delete project"}
                 </button>
@@ -204,54 +220,86 @@ export default function ProjectDesk({
             <span>{members.length} people</span>
           </div>
 
-          <div className="project-member-list">
-            {members.map((member) => (
-              <div className="project-member" key={member.userId}>
-                <div>
-                  <strong>{member.fullName || member.username}</strong>
-                  <span>@{member.username}</span>
-                </div>
-                <div className="project-member-actions">
-                  {member.owner ? (
-                    <span className="project-owner-badge">Owner</span>
-                  ) : (
-                    <button
-                      className="text-action"
-                      type="button"
-                      disabled={memberMutationPhase !== "idle"}
-                      aria-label={`Remove ${member.fullName || member.username}`}
-                      onClick={() => setMemberPendingRemoval(member)}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <form className="project-member-add" onSubmit={handleAddMember}>
-            <div className="field-group">
-              <label htmlFor={`participant-username-${project.id}`}>Participant username</label>
-              <input
-                id={`participant-username-${project.id}`}
-                value={participantUsername}
-                onChange={(event) => setParticipantUsername(event.target.value)}
-                maxLength={50}
-                autoComplete="off"
-                required
-              />
+          {memberLoadPhase === "loading" ? (
+            <div className="archive-status" role="status" aria-live="polite">
+              <span className="status-orbit" aria-hidden="true" />
+              <p>Reading project participants…</p>
             </div>
-            <button
-              className="primary-action compact-action"
-              type="submit"
-              disabled={memberMutationPhase !== "idle" || participantUsername.trim().length === 0}
-            >
-              {memberMutationPhase === "adding" ? "Adding participant…" : "Add participant"}
-            </button>
-          </form>
+          ) : null}
 
-          {memberError ? <p className="project-mutation-error" role="alert">{memberError}</p> : null}
+          {memberLoadError ? (
+            <div className="project-people-load-error">
+              <p className="project-mutation-error" role="alert">{memberLoadError.message}</p>
+              {memberLoadError.retryable ? (
+                <button className="text-action" type="button" onClick={onRetryMembers}>
+                  Try again
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {memberLoadPhase !== "loading" && !memberLoadError && members.length === 0 ? (
+            <p className="project-people-empty">No participants are listed for this project.</p>
+          ) : null}
+
+          {memberLoadPhase !== "loading" && !memberLoadError && members.length > 0 ? (
+            <div className="project-member-list">
+              {members.map((member) => (
+                <div className="project-member" key={member.userId}>
+                  <div>
+                    <strong>{member.fullName || member.username}</strong>
+                    <span>@{member.username}</span>
+                  </div>
+                  <div className="project-member-actions">
+                    {member.role ? (
+                      <span className="project-owner-badge">{member.role.toLowerCase()}</span>
+                    ) : null}
+                    {canRemoveProjectMember({
+                      actorRole: permissions.role,
+                      targetRole: member.role,
+                    }) ? (
+                      <button
+                        className="text-action"
+                        type="button"
+                        disabled={memberMutationPhase !== "idle"}
+                        aria-label={`Remove ${member.fullName || member.username}`}
+                        onClick={() => setMemberPendingRemoval(member)}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {permissions.canManageMembers && !memberLoadError ? (
+            <form className="project-member-add" onSubmit={handleAddMember}>
+              <div className="field-group">
+                <label htmlFor={`participant-username-${project.id}`}>Participant username</label>
+                <input
+                  id={`participant-username-${project.id}`}
+                  value={participantUsername}
+                  onChange={(event) => setParticipantUsername(event.target.value)}
+                  maxLength={50}
+                  autoComplete="off"
+                  required
+                />
+              </div>
+              <button
+                className="primary-action compact-action"
+                type="submit"
+                disabled={memberMutationPhase !== "idle" || participantUsername.trim().length === 0}
+              >
+                {memberMutationPhase === "adding" ? "Adding participant…" : "Add participant"}
+              </button>
+            </form>
+          ) : null}
+
+          {memberError ? (
+            <p className="project-mutation-error" role="alert">{memberError.message}</p>
+          ) : null}
 
           {memberPendingRemoval ? (
             <div
