@@ -24,6 +24,7 @@ target/
 /nbproject/private/
 /nbbuild/
 /dist/
+/node_modules/
 /nbdist/
 /.nb-gradle/
 build/
@@ -37,3 +38,11 @@ build/
 .env
 .env.local
 .env.*.local
+
+### Python ###
+**/.venv/
+**/__pycache__/
+*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.pyright/

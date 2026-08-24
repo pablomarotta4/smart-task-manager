@@ -1,4 +1,14 @@
 {
+  "name": "smart-task-manager-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:web": "vitest"
+  },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -7,7 +17,18 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-hot-toast": "^2.6.0",
     "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@vitejs/plugin-react": "^6.0.5",
+    "jsdom": "^30.0.1",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
   }
 }

@@ -29,6 +29,9 @@ public class Project {
     @Column(nullable = false)
     private String name;
 
+    @Column(columnDefinition = "TEXT")
+    private String objective;
+
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "owner_id", nullable = false)

@@ -14,6 +14,7 @@ import com.pablomarotta.smart_task_manager.model.Project;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "tasks")
@@ -96,4 +97,18 @@ public class Task {
 
     @Column(name = "ai_summary", columnDefinition = "TEXT")
     private String aiSummary;
+
+    @Column(name = "planning_client_id", length = 50)
+    private String planningClientId;
+
+    @Column(name = "estimated_hours", precision = 6, scale = 2)
+    private BigDecimal estimatedHours;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "generation_run_id")
+    private ProjectGenerationRun generationRun;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_task_id")
+    private Task parentTask;
 }

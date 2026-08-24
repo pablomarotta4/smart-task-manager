@@ -1,0 +1,51 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:1/testcontainers_required
+    username: testcontainers_required
+    password: testcontainers_required
+  jpa:
+    show-sql: false
+  flyway:
+    clean-disabled: true
+  mail:
+    host: localhost
+    port: 1025
+    properties:
+      mail:
+        smtp:
+          auth: false
+          starttls:
+            enable: false
+
+ai:
+  ollama:
+    enabled: false
+
+email-outbox:
+  enabled: false
+  dispatch-delay-ms: 60000
+  link-base-url: http://localhost:3000
+  from-address: no-reply@smart-task-manager.test
+  batch-size: 20
+  maximum-attempts: 5
+  stale-claim-after: 5m
+  retry-initial-delay: 10s
+  retry-maximum-delay: 15m
+
+auth-rate-limit:
+  max-attempts: 10000
+  window-seconds: 60
+  max-entries: 100000
+  enforcement-mode: single-instance
+  single-instance-acknowledged: false
+  trusted-proxies: ""
+
+jwt:
+  secret: integration-test-access-secret-not-for-production-1234567890
+
+account-action:
+  token-secret: integration-test-action-secret-not-for-production-1234567890
+
+logging:
+  level:
+    org.flywaydb: INFO

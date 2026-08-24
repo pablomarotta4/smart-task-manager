@@ -1,44 +1,51 @@
 package com.pablomarotta.smart_task_manager.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.pablomarotta.smart_task_manager.dto.*;
+import com.pablomarotta.smart_task_manager.dto.AuthResponse;
+import com.pablomarotta.smart_task_manager.dto.ProjectRequest;
+import com.pablomarotta.smart_task_manager.dto.ProjectResponse;
+import com.pablomarotta.smart_task_manager.dto.RegisterRequest;
+import com.pablomarotta.smart_task_manager.dto.TaskRequest;
+import com.pablomarotta.smart_task_manager.dto.TaskResponse;
 import com.pablomarotta.smart_task_manager.model.Status;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import static org.junit.jupiter.api.Assertions.*;
+import javax.sql.DataSource;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@TestPropertySource(properties = {
-    "ai.ollama.enabled=true",
-    "ai.ollama.base-url=http://localhost:11434",
-    "ai.ollama.model=llama3.2"
-})
-public class TaskAIIntegrationTest {
+public class TaskPersistenceIntegrationTest extends PostgresIntegrationTest {
+
+    private final MockMvc mockMvc;
+
+    private final ObjectMapper objectMapper;
 
     @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
+    TaskPersistenceIntegrationTest(DataSource dataSource, MockMvc mockMvc, ObjectMapper objectMapper) {
+        super(dataSource);
+        this.mockMvc = mockMvc;
+        this.objectMapper = objectMapper;
+    }
 
     @Test
-    public void testCreateTaskWithAIClassification() throws Exception {
-        // 1. Registrar usuario y obtener token
+    void createsAndRetrievesTask() throws Exception {
         RegisterRequest registerRequest = new RegisterRequest();
-        registerRequest.setUsername("aitest_user");
-        registerRequest.setEmail("aitest@example.com");
+        registerRequest.setUsername("persistence_test_user");
+        registerRequest.setEmail("persistence@example.com");
         registerRequest.setPassword("password123");
-        registerRequest.setFullName("AI Test User");
+        registerRequest.setFullName("Persistence Test User");
 
         MvcResult authResult = mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -53,9 +60,8 @@ public class TaskAIIntegrationTest {
         assertNotNull(authResponse.getUser().getId());
         String token = authResponse.getToken();
 
-        // 2. Crear proyecto
         ProjectRequest projectRequest = new ProjectRequest();
-        projectRequest.setName("AI Test Project");
+        projectRequest.setName("Persistence Test Project");
         projectRequest.setUsername(authResponse.getUser().getUsername());
 
         MvcResult projectResult = mockMvc.perform(post("/api/projects")
@@ -71,7 +77,6 @@ public class TaskAIIntegrationTest {
         );
         assertNotNull(projectResponse.getId());
 
-        // 3. Crear tarea con descripción detallada para que la IA la clasifique
         TaskRequest taskRequest = new TaskRequest();
         taskRequest.setTitle("Fix critical authentication bug");
         taskRequest.setDescription("Users are unable to login after password reset. " +
@@ -92,23 +97,11 @@ public class TaskAIIntegrationTest {
                 TaskResponse.class
         );
 
-        // 4. Verificar que la tarea fue creada
         assertNotNull(taskResponse.getId());
         assertEquals("Fix critical authentication bug", taskResponse.getTitle());
         assertEquals(Status.TODO, taskResponse.getStatus());
         assertEquals(projectResponse.getId(), taskResponse.getProjectId());
 
-        // 5. Verificar que la IA clasificó la tarea
-        // Nota: Los campos AI no están en TaskResponse actualmente,
-        // pero deberían estar para validar la clasificación
-        System.out.println("Task created with ID: " + taskResponse.getId());
-        System.out.println("AI classification should have populated:");
-        System.out.println("- aiPriority (expected: HIGH or URGENT)");
-        System.out.println("- aiCategory (expected: BUG)");
-        System.out.println("- aiSuggestedDueDays (expected: 1-3 days)");
-        System.out.println("- aiSummary (expected: concise summary)");
-
-        // 6. Obtener la tarea completa para verificar campos AI
         MvcResult getTaskResult = mockMvc.perform(get("/api/tasks/" + taskResponse.getId())
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
@@ -121,24 +114,14 @@ public class TaskAIIntegrationTest {
 
         assertNotNull(retrievedTask);
         assertEquals(taskResponse.getId(), retrievedTask.getId());
-
-        // TODO: Descomentar cuando TaskResponse incluya campos AI
-        // assertNotNull(retrievedTask.getAiPriority(), "AI should have classified priority");
-        // assertNotNull(retrievedTask.getAiCategory(), "AI should have classified category");
-        // assertNotNull(retrievedTask.getAiSuggestedDueDays(), "AI should have suggested due days");
-        // assertNotNull(retrievedTask.getAiSummary(), "AI should have generated summary");
-
-        // assertTrue(
-        //     retrievedTask.getAiPriority().equals("HIGH") || retrievedTask.getAiPriority().equals("URGENT"),
-        //     "Critical bug should be HIGH or URGENT priority"
-        // );
-        // assertEquals("BUG", retrievedTask.getAiCategory(), "Should be classified as BUG");
-        // assertTrue(retrievedTask.getAiSuggestedDueDays() <= 3, "Critical bug should be completed within 3 days");
+        assertEquals(taskResponse.getTitle(), retrievedTask.getTitle());
+        assertEquals(taskResponse.getDescription(), retrievedTask.getDescription());
+        assertEquals(taskResponse.getStatus(), retrievedTask.getStatus());
+        assertEquals(taskResponse.getProjectId(), retrievedTask.getProjectId());
     }
 
     @Test
-    public void testCreateTaskWithAI_FeatureRequest() throws Exception {
-        // 1. Registrar usuario y obtener token
+    void createsTaskWithFeatureDescription() throws Exception {
         RegisterRequest registerRequest = new RegisterRequest();
         registerRequest.setUsername("feature_test_user");
         registerRequest.setEmail("featuretest@example.com");
@@ -157,7 +140,6 @@ public class TaskAIIntegrationTest {
         );
         String token = authResponse.getToken();
 
-        // 2. Crear proyecto
         ProjectRequest projectRequest = new ProjectRequest();
         projectRequest.setName("Feature Test Project");
         projectRequest.setUsername(authResponse.getUser().getUsername());
@@ -174,7 +156,6 @@ public class TaskAIIntegrationTest {
                 ProjectResponse.class
         );
 
-        // 3. Crear tarea tipo FEATURE
         TaskRequest taskRequest = new TaskRequest();
         taskRequest.setTitle("Add dark mode theme");
         taskRequest.setDescription("Implement a dark mode theme toggle for better user experience. " +
@@ -196,10 +177,7 @@ public class TaskAIIntegrationTest {
 
         assertNotNull(taskResponse.getId());
         assertEquals("Add dark mode theme", taskResponse.getTitle());
-
-        // TODO: Verificar clasificación AI cuando TaskResponse incluya campos
-        // assertNotNull(taskResponse.getAiCategory());
-        // assertEquals("FEATURE", taskResponse.getAiCategory());
-        // assertTrue(taskResponse.getAiSuggestedDueDays() >= 5, "Feature should take several days");
+        assertEquals(Status.TODO, taskResponse.getStatus());
+        assertEquals(projectResponse.getId(), taskResponse.getProjectId());
     }
 }

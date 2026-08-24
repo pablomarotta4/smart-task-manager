@@ -5,8 +5,12 @@ import com.pablomarotta.smart_task_manager.dto.ProjectResponse;
 import com.pablomarotta.smart_task_manager.exception.ProjectNotFoundException;
 import com.pablomarotta.smart_task_manager.exception.UserNotFoundException;
 import com.pablomarotta.smart_task_manager.model.Project;
+import com.pablomarotta.smart_task_manager.model.ProjectMembership;
+import com.pablomarotta.smart_task_manager.model.ProjectRole;
 import com.pablomarotta.smart_task_manager.model.User;
+import com.pablomarotta.smart_task_manager.repository.ProjectMembershipRepository;
 import com.pablomarotta.smart_task_manager.repository.ProjectRepository;
+import com.pablomarotta.smart_task_manager.repository.TaskRepository;
 import com.pablomarotta.smart_task_manager.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,6 +37,14 @@ class ProjectServiceTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private TaskRepository taskRepository;
+
+    @Mock
+    private ProjectMembershipRepository membershipRepository;
+    @Mock
+    private ProjectAccessPolicy accessPolicy;
 
     @InjectMocks
     private ProjectService projectService;
@@ -49,12 +62,14 @@ class ProjectServiceTest {
         project = Project.builder()
                 .id(1L)
                 .name("Test Project")
+                .objective("Deliver the first useful release")
                 .owner(owner)
                 .createdAt(java.time.LocalDateTime.now())
                 .build();
 
         projectRequest = new ProjectRequest();
         projectRequest.setName("Test Project");
+        projectRequest.setObjective("Deliver the first useful release");
         projectRequest.setUsername("testuser");
     }
 
@@ -65,16 +80,51 @@ class ProjectServiceTest {
         when(projectRepository.save(any(Project.class))).thenReturn(project);
 
         // Act
-        ProjectResponse response = projectService.createProject(projectRequest);
+        ProjectResponse response = projectService.createProject(projectRequest, "testuser");
 
         // Assert
         assertNotNull(response);
         assertEquals(project.getId(), response.getId());
         assertEquals(project.getName(), response.getName());
+        assertEquals(project.getObjective(), response.getObjective());
         assertEquals(owner.getId(), response.getOwnerId());
         assertEquals(owner.getUsername(), response.getOwnerUsername());
+        assertEquals(ProjectRole.OWNER, response.getCurrentUserRole());
         verify(userRepository, times(1)).findByUsername("testuser");
         verify(projectRepository, times(1)).save(any(Project.class));
+        verify(membershipRepository).save(argThat((ProjectMembership membership) ->
+                membership.getProject() == project && membership.getUser() == owner
+        ));
+    }
+
+    @Test
+    void createProject_PersistsManualObjective() {
+        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(owner));
+        when(projectRepository.save(any(Project.class))).thenAnswer(invocation -> {
+            Project saved = invocation.getArgument(0);
+            saved.setId(1L);
+            return saved;
+        });
+
+        ProjectResponse response = projectService.createProject(projectRequest, "testuser");
+
+        assertEquals("Deliver the first useful release", response.getObjective());
+        verify(projectRepository).save(argThat(saved ->
+                "Deliver the first useful release".equals(saved.getObjective())
+        ));
+    }
+
+    @Test
+    void createProject_IgnoresClientSuppliedOwner() {
+        projectRequest.setUsername("attacker");
+        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(owner));
+        when(projectRepository.save(any(Project.class))).thenReturn(project);
+
+        ProjectResponse response = projectService.createProject(projectRequest, "testuser");
+
+        assertEquals("testuser", response.getOwnerUsername());
+        verify(userRepository).findByUsername("testuser");
+        verify(userRepository, never()).findByUsername("attacker");
     }
 
     @Test
@@ -84,21 +134,21 @@ class ProjectServiceTest {
 
         // Act & Assert
         assertThrows(UserNotFoundException.class, () -> {
-            projectService.createProject(projectRequest);
+            projectService.createProject(projectRequest, "testuser");
         });
         verify(userRepository, times(1)).findByUsername("testuser");
         verify(projectRepository, never()).save(any(Project.class));
     }
 
     @Test
-    void createProject_WhenExceptionThrown_ShouldThrowResponseStatusException() {
+    void createProject_PropagatesPersistenceFailure() {
         // Arrange
         when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(owner));
         when(projectRepository.save(any(Project.class))).thenThrow(new RuntimeException("Database error"));
 
         // Act & Assert
-        assertThrows(ResponseStatusException.class, () -> {
-            projectService.createProject(projectRequest);
+        assertThrows(RuntimeException.class, () -> {
+            projectService.createProject(projectRequest, "testuser");
         });
     }
 
@@ -108,47 +158,136 @@ class ProjectServiceTest {
         Project project2 = Project.builder()
                 .id(2L)
                 .name("Another Project")
+                .objective("Ship the next useful milestone")
                 .owner(owner)
-                .createdAt(java.time.LocalDateTime.now())
+                .createdAt(LocalDateTime.now().plusMinutes(1))
                 .build();
 
-        when(projectRepository.findAll()).thenReturn(Arrays.asList(project, project2));
+        when(membershipRepository.findByUserUsernameOrderByProjectCreatedAtDesc("testuser"))
+                .thenReturn(List.of(membership(project2, ProjectRole.MANAGER), membership(project, ProjectRole.MEMBER)));
+        when(taskRepository.countTasksByProjectMemberUsername("testuser")).thenReturn(List.of(
+                taskCount(1L, 3L),
+                taskCount(2L, 6L)
+        ));
 
         // Act
-        List<ProjectResponse> projects = projectService.getAllProjects();
+        List<ProjectResponse> projects = projectService.getAllProjects("testuser");
 
         // Assert
         assertNotNull(projects);
         assertEquals(2, projects.size());
-        assertEquals("Test Project", projects.get(0).getName());
-        assertEquals("Another Project", projects.get(1).getName());
-        verify(projectRepository, times(1)).findAll();
+        assertEquals("Another Project", projects.get(0).getName());
+        assertEquals("Ship the next useful milestone", projects.get(0).getObjective());
+        assertEquals(6L, projects.get(0).getTaskCount());
+        assertEquals(ProjectRole.MANAGER, projects.get(0).getCurrentUserRole());
+        assertEquals("Test Project", projects.get(1).getName());
+        assertEquals(3L, projects.get(1).getTaskCount());
+        verify(membershipRepository).findByUserUsernameOrderByProjectCreatedAtDesc("testuser");
+        verify(taskRepository).countTasksByProjectMemberUsername("testuser");
+        verify(taskRepository, never()).countTasksByProject();
     }
 
     @Test
     void getProjectById_WithValidId_ShouldReturnProject() {
         // Arrange
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
+        when(accessPolicy.requireMember(1L, "testuser"))
+                .thenReturn(membership(project, ProjectRole.MEMBER));
 
         // Act
-        ProjectResponse response = projectService.getProjectById(1L);
+        ProjectResponse response = projectService.getProjectById(1L, "testuser");
 
         // Assert
         assertNotNull(response);
         assertEquals(project.getId(), response.getId());
         assertEquals(project.getName(), response.getName());
-        verify(projectRepository, times(1)).findById(1L);
+        assertEquals(ProjectRole.MEMBER, response.getCurrentUserRole());
     }
 
     @Test
     void getProjectById_WithInvalidId_ShouldThrowProjectNotFoundException() {
         // Arrange
-        when(projectRepository.findById(99L)).thenReturn(Optional.empty());
+        when(accessPolicy.requireMember(99L, "testuser"))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 99"));
 
         // Act & Assert
         assertThrows(ProjectNotFoundException.class, () -> {
-            projectService.getProjectById(99L);
+            projectService.getProjectById(99L, "testuser");
         });
-        verify(projectRepository, times(1)).findById(99L);
+    }
+
+    @Test
+    void updateProject_ChangesOwnedProject() {
+        ProjectRequest update = new ProjectRequest();
+        update.setName("Renamed Project");
+        update.setObjective("Ship the revised outcome");
+        when(accessPolicy.requireOwner(1L, "testuser"))
+                .thenReturn(membership(project, ProjectRole.OWNER));
+        when(projectRepository.save(project)).thenReturn(project);
+        when(taskRepository.countByProjectId(1L)).thenReturn(3L);
+
+        ProjectResponse response = projectService.updateProject(1L, update, "testuser");
+
+        assertEquals("Renamed Project", response.getName());
+        assertEquals("Ship the revised outcome", response.getObjective());
+        assertEquals(3L, response.getTaskCount());
+        verify(projectRepository).save(project);
+    }
+
+    @Test
+    void updateProject_RejectsForeignProjectWithoutWriting() {
+        when(accessPolicy.requireOwner(1L, "testuser"))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 1"));
+
+        assertThrows(
+                ProjectNotFoundException.class,
+                () -> projectService.updateProject(1L, projectRequest, "testuser")
+        );
+
+        verify(projectRepository, never()).save(any());
+    }
+
+    @Test
+    void deleteProject_RemovesOwnedProject() {
+        when(accessPolicy.requireOwner(1L, "testuser"))
+                .thenReturn(membership(project, ProjectRole.OWNER));
+
+        projectService.deleteProject(1L, "testuser");
+
+        verify(projectRepository).delete(project);
+    }
+
+    @Test
+    void deleteProject_RejectsForeignProjectWithoutWriting() {
+        when(accessPolicy.requireOwner(1L, "testuser"))
+                .thenThrow(new ProjectNotFoundException("Project not found with id: 1"));
+
+        assertThrows(
+                ProjectNotFoundException.class,
+                () -> projectService.deleteProject(1L, "testuser")
+        );
+
+        verify(projectRepository, never()).delete(any());
+    }
+
+    private TaskRepository.ProjectTaskCount taskCount(Long projectId, Long taskCount) {
+        return new TaskRepository.ProjectTaskCount() {
+            @Override
+            public Long getProjectId() {
+                return projectId;
+            }
+
+            @Override
+            public Long getTaskCount() {
+                return taskCount;
+            }
+        };
+    }
+
+    private ProjectMembership membership(Project project, ProjectRole role) {
+        return ProjectMembership.builder()
+                .project(project)
+                .user(owner)
+                .role(role)
+                .build();
     }
 }

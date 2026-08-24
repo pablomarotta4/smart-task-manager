@@ -16,5 +16,59 @@ services:
       timeout: 5s
       retries: 5
 
+  mailpit:
+    image: axllent/mailpit:v1.24
+    container_name: smart_task_manager_mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    profiles: ["ai"]
+    image: ollama/ollama:latest
+    container_name: smart_task_manager_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  ai-service:
+    profiles: ["ai"]
+    build:
+      context: ./ai-service
+    container_name: smart_task_manager_ai
+    environment:
+      SMART_TASK_AI_OLLAMA_BASE_URL: http://ollama:11434
+      SMART_TASK_AI_OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    ports:
+      - "8000:8000"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
 volumes:
   postgres_data:
+  ollama_data:

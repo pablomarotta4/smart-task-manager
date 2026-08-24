@@ -1,0 +1,1930 @@
+import { act, StrictMode } from "react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import App from "./App";
+import { ApiError } from "./api";
+
+const authenticatedUser = {
+  token: "jwt-token",
+  user: {
+    id: 18,
+    username: "pablo-local",
+    fullName: "Pablo Local Tester",
+    email: "pablo@example.com",
+    emailVerified: true,
+  },
+};
+
+const generatedDraft = {
+  runId: "run-1",
+  status: "DRAFT_READY",
+  draft: {
+    name: "Kitchen Redesign Project",
+    objective: "Plan and deliver a practical kitchen redesign within the agreed budget.",
+    assumptions: ["The existing kitchen footprint stays unchanged"],
+    risks: ["Contractor availability may affect the schedule"],
+    openQuestions: [
+      "Should the kitchen remain usable during construction?",
+      "Is there a fixed budget ceiling for the first release?",
+    ],
+    tickets: [
+      {
+        client_id: "design-kitchen",
+        title: "Define the kitchen redesign requirements",
+        description: "Document the desired layout, appliances, materials, and constraints.",
+        priority: "HIGH",
+        estimated_hours: 6,
+        acceptance_criteria: ["A reviewed requirements document lists every requested change"],
+        depends_on: [],
+        category: "Planning",
+        due_in_days: 3,
+      },
+      {
+        client_id: "select-contractors",
+        title: "Select qualified renovation contractors",
+        description: "Compare qualified contractors using scope, price, and availability.",
+        priority: "HIGH",
+        estimated_hours: 8,
+        acceptance_criteria: ["At least three comparable contractor proposals are evaluated"],
+        depends_on: ["design-kitchen"],
+        category: "Procurement",
+        due_in_days: 10,
+      },
+      {
+        client_id: "schedule-work",
+        title: "Schedule the renovation work",
+        description: "Create a sequenced schedule for demolition, installation, and inspection.",
+        priority: "MEDIUM",
+        estimated_hours: 4,
+        acceptance_criteria: ["Every work phase has an owner and target completion date"],
+        depends_on: ["select-contractors"],
+        category: "Delivery",
+        due_in_days: 14,
+      },
+    ],
+  },
+  quality: {
+    score: 100,
+    passed: true,
+    issues: [],
+    metrics: {
+      ticket_count: 3,
+      unique_title_ratio: 1,
+      max_title_similarity: 0.2,
+      description_coverage: 1,
+      acceptance_criteria_coverage: 1,
+    },
+  },
+  revisionCount: 0,
+  model: "gemma3:4b",
+};
+
+const savedProjects = [
+  {
+    id: 20,
+    name: "Job Application Tracker - Initial Backlog",
+    objective: "Track opportunities from discovery through offer decisions.",
+    taskCount: 6,
+    ownerId: 18,
+    ownerUsername: "pablo-local",
+    currentUserRole: "OWNER",
+    createdAt: "2026-08-09T23:57:01.424559",
+  },
+  {
+    id: 19,
+    name: "Neighborhood Tool Lending Library - Phase 1",
+    objective: "Let neighbors reserve and return shared tools.",
+    taskCount: 6,
+    ownerId: 18,
+    ownerUsername: "pablo-local",
+    currentUserRole: "OWNER",
+    createdAt: "2026-08-09T23:44:04.410638",
+  },
+];
+
+const savedProjectTasks = [
+  {
+    id: 201,
+    projectId: 20,
+    title: "Create opportunity intake",
+    description: "Capture company, role, source, compensation, and the application link.",
+    status: "TODO",
+    position: 0,
+    priority: "HIGH",
+    category: "Opportunities",
+    dueDate: "2026-08-14",
+    estimatedHours: 4.5,
+    planningClientId: "opportunity-intake",
+    acceptanceCriteria: ["A saved opportunity includes company, role, and source"],
+    dependsOn: [],
+    aiSummary: "Build the structured intake for every potential role.",
+  },
+  {
+    id: 202,
+    projectId: 20,
+    title: "Track application stages",
+    description: "Show every application in its current stage with the next action.",
+    status: "IN_PROGRESS",
+    position: 1,
+    priority: "HIGH",
+    category: "Workflow",
+    dueDate: "2026-08-18",
+    estimatedHours: 6,
+    planningClientId: "application-stages",
+    acceptanceCriteria: ["Every application has a visible current stage"],
+    dependsOn: ["opportunity-intake"],
+    aiSummary: "Make application progress and next actions visible.",
+  },
+];
+
+const savedOtherProjectTasks = [
+  {
+    id: 301,
+    projectId: 19,
+    title: "Repair the reservation handoff",
+    description: "Remove the blocker between tool availability and confirmed reservations.",
+    status: "BLOCKED",
+    position: 0,
+    priority: "URGENT",
+    category: "Reservations",
+    dueDate: "2026-08-11",
+    estimatedHours: 3,
+    planningClientId: "reservation-handoff",
+    acceptanceCriteria: ["A resident can reserve an available tool"],
+    dependsOn: ["tool-inventory"],
+    aiSummary: "Restore the critical reservation path.",
+  },
+  {
+    id: 302,
+    projectId: 19,
+    title: "Catalog the remaining hand tools",
+    description: "Add the lower-priority inventory that has no target date yet.",
+    status: "TODO",
+    position: 1,
+    priority: "LOW",
+    category: "Inventory",
+    dueDate: null,
+    estimatedHours: 2,
+    planningClientId: "remaining-hand-tools",
+    acceptanceCriteria: ["Every available hand tool appears in the catalog"],
+    dependsOn: [],
+    aiSummary: "Complete the long-tail inventory after the critical path.",
+  },
+  {
+    id: 303,
+    projectId: 19,
+    title: "Reconcile the inventory audit",
+    description: "Close the inventory audit that passed its target date.",
+    status: "TODO",
+    position: 2,
+    priority: "LOW",
+    category: "Inventory",
+    dueDate: "2000-01-01",
+    estimatedHours: 1,
+    planningClientId: "overdue-inventory-audit",
+    acceptanceCriteria: ["The audit result matches the physical inventory"],
+    dependsOn: [],
+    aiSummary: "Surface an overdue task without promoting its priority.",
+  },
+];
+
+const projectMembers = [
+  {
+    membershipId: 401,
+    userId: 18,
+    username: "pablo-local",
+    fullName: "Pablo Local Tester",
+    owner: true,
+    role: "OWNER",
+    joinedAt: "2026-08-09T12:00:00",
+  },
+  {
+    membershipId: 402,
+    userId: 2,
+    username: "bob",
+    fullName: "Bob Builder",
+    owner: false,
+    role: "MEMBER",
+    joinedAt: "2026-08-10T12:00:00",
+  },
+];
+
+const assignedWorkItems = [
+  {
+    ...savedProjectTasks[1],
+    projectName: savedProjects[0].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+  {
+    ...savedOtherProjectTasks[0],
+    projectName: savedProjects[1].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+  {
+    ...savedOtherProjectTasks[1],
+    projectName: savedProjects[1].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+  {
+    ...savedOtherProjectTasks[2],
+    projectName: savedProjects[1].name,
+    assigneeId: 18,
+    assigneeUsername: "pablo-local",
+  },
+];
+
+const readyPlanningRun = {
+  runId: "run-ready",
+  mode: "NEW_PROJECT",
+  status: "DRAFT_READY",
+  prompt: "Build a home renovation plan for redesigning and delivering a new kitchen",
+  attemptCount: 1,
+  projectId: null,
+  projectName: null,
+  targetTaskId: null,
+  targetTaskTitle: null,
+  errorCode: null,
+  retryable: false,
+  createdAt: "2026-08-11T10:00:00",
+  updatedAt: "2026-08-11T10:01:00",
+};
+
+const failedExistingPlanningRun = {
+  runId: "run-failed",
+  mode: "EXISTING_TASK",
+  status: "FAILED",
+  prompt: "Break this ticket into an actionable implementation plan",
+  attemptCount: 1,
+  projectId: 20,
+  projectName: "Job Application Tracker - Initial Backlog",
+  targetTaskId: 201,
+  targetTaskTitle: "Create opportunity intake",
+  errorCode: "AI_PLANNING_UNAVAILABLE",
+  retryable: true,
+  createdAt: "2026-08-11T10:00:00",
+  updatedAt: "2026-08-11T10:01:00",
+};
+
+const createClient = () => ({
+  login: vi.fn().mockResolvedValue(authenticatedUser),
+  register: vi.fn().mockResolvedValue(authenticatedUser),
+  getCurrentUser: vi.fn().mockResolvedValue(authenticatedUser.user),
+  refreshSession: vi.fn().mockResolvedValue(authenticatedUser),
+  logout: vi.fn().mockResolvedValue(null),
+  requestPasswordReset: vi.fn().mockResolvedValue(null),
+  confirmPasswordReset: vi.fn().mockResolvedValue(null),
+  confirmEmailVerification: vi.fn().mockResolvedValue(null),
+  resendEmailVerification: vi.fn().mockResolvedValue(null),
+  generateProject: vi.fn().mockResolvedValue(generatedDraft),
+  generateTaskPlan: vi.fn().mockResolvedValue(generatedDraft),
+  confirmProject: vi.fn(),
+  getGenerationRuns: vi.fn().mockResolvedValue([]),
+  getGenerationRun: vi.fn(),
+  retryGenerationRun: vi.fn(),
+  getProjects: vi.fn().mockResolvedValue(savedProjects),
+  createProject: vi.fn().mockImplementation(({ project }) => Promise.resolve({
+    id: 21,
+    ...project,
+    ownerId: 7,
+    ownerUsername: "pablo-local",
+    currentUserRole: "OWNER",
+    taskCount: 0,
+    createdAt: "2026-08-11T12:00:00",
+  })),
+  updateProject: vi.fn().mockImplementation(({ projectId, project }) =>
+    Promise.resolve({ ...savedProjects[0], id: projectId, ...project })),
+  deleteProject: vi.fn().mockResolvedValue(null),
+  getProjectMembers: vi.fn().mockResolvedValue(projectMembers),
+  addProjectMember: vi.fn().mockImplementation(({ username }) => Promise.resolve({
+    membershipId: 403,
+    userId: 3,
+    username,
+    fullName: "Carol Coordinator",
+    owner: false,
+    role: "MEMBER",
+    joinedAt: "2026-08-11T12:00:00",
+  })),
+  removeProjectMember: vi.fn().mockResolvedValue(null),
+  getProjectTasks: vi.fn().mockResolvedValue(savedProjectTasks),
+  getMyWork: vi.fn().mockResolvedValue(assignedWorkItems),
+  createTask: vi.fn().mockImplementation(({ task }) =>
+    Promise.resolve({ id: 203, ...task })),
+  updateTask: vi.fn().mockImplementation(({ taskId, task }) =>
+    Promise.resolve({ id: taskId, ...task })),
+  updateTaskStatus: vi.fn().mockImplementation(({ taskId, status }) =>
+    Promise.resolve({ id: taskId, status })),
+  assignTask: vi.fn().mockImplementation(({ taskId, userId }) =>
+    Promise.resolve({ id: taskId, assigneeId: userId })),
+  deleteTask: vi.fn().mockResolvedValue(null),
+});
+
+const logIn = async (user, client) => {
+  await user.type(screen.getByLabelText(/username/i), "pablo-local");
+  await user.type(screen.getByLabelText(/password/i), "SmartTasks123!");
+  await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+  await screen.findByText("Pablo Local Tester");
+  expect(client.login).toHaveBeenCalledWith({
+    username: "pablo-local",
+    password: "SmartTasks123!",
+  });
+};
+
+const generateDraft = async (user, client) => {
+  await logIn(user, client);
+  await user.type(
+    screen.getByLabelText(/describe your project/i),
+    "Build a home renovation plan for redesigning and delivering a new kitchen",
+  );
+  await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+  await screen.findByRole("heading", { name: "Kitchen Redesign Project" });
+};
+
+describe("AI project workshop", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("signs in and opens the prompt workspace", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    expect(screen.getByRole("heading", { name: /what are we building/i })).toBeInTheDocument();
+    expect(sessionStorage.getItem("smart-task-session")).toContain("jwt-token");
+  });
+
+  it("creates an account from the access panel and opens an authenticated session", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.register.mockResolvedValue({
+      token: "registered-token",
+      user: {
+        id: 21,
+        username: "new-planner",
+        fullName: "New Planner",
+        email: "new@example.com",
+      },
+    });
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /create account/i }));
+    await user.type(screen.getByLabelText(/full name/i), "New Planner");
+    await user.type(screen.getByLabelText(/email/i), "new@example.com");
+    await user.type(screen.getByLabelText(/username/i), "new-planner");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /create my workspace/i }));
+
+    expect(client.register).toHaveBeenCalledWith({
+      fullName: "New Planner",
+      email: "new@example.com",
+      username: "new-planner",
+      password: "password123",
+    });
+    expect(await screen.findByText("New Planner")).toBeInTheDocument();
+    expect(sessionStorage.getItem("smart-task-session")).toContain("registered-token");
+  });
+
+  it("requests a reset without disclosing whether the email exists", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /forgot password/i }));
+    expect(window.location.pathname).toBe("/forgot-password");
+    await user.type(screen.getByLabelText(/account email/i), "missing@example.com");
+    await user.click(screen.getByRole("button", { name: /send reset link/i }));
+
+    expect(client.requestPasswordReset).toHaveBeenCalledWith({
+      email: "missing@example.com",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If an account matches that email, a reset link will arrive shortly.",
+    );
+  });
+
+  it("removes the reset token fragment before confirmation and posts it only on user action", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const rawToken = "reset.header.payload.signature";
+    window.history.replaceState({}, "", `/reset-password#token=${rawToken}`);
+
+    render(<StrictMode><App client={client} /></StrictMode>);
+
+    expect(window.location.hash).toBe("");
+    expect(document.body).not.toHaveTextContent(rawToken);
+    expect(client.confirmPasswordReset).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText(/^new password$/i), "UpdatedPassword123!");
+    await user.type(screen.getByLabelText(/confirm new password/i), "UpdatedPassword123!");
+    await user.click(screen.getByRole("button", { name: /^reset password$/i }));
+
+    expect(client.confirmPasswordReset).toHaveBeenCalledWith({
+      token: rawToken,
+      password: "UpdatedPassword123!",
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Your password has been reset. You can sign in with the new password.",
+    );
+    expect(document.body).not.toHaveTextContent(rawToken);
+  });
+
+  it("fails closed when a reset link has no fragment token", () => {
+    const client = createClient();
+    window.history.replaceState({}, "", "/reset-password");
+
+    render(<App client={client} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("This reset link is incomplete.");
+    expect(screen.queryByRole("button", { name: /^reset password$/i })).not.toBeInTheDocument();
+    expect(client.confirmPasswordReset).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ACCOUNT_ACTION_INVALID", "This reset link is invalid."],
+    ["ACCOUNT_ACTION_EXPIRED", "This reset link has expired."],
+    ["ACCOUNT_ACTION_USED", "This reset link has already been used."],
+    ["ACCOUNT_ACTION_SUPERSEDED", "A newer reset link replaced this one."],
+  ])("renders the stable %s reset state without backend copy", async (code, copy) => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmPasswordReset.mockRejectedValue(
+      new ApiError("sensitive backend message", { status: 410, code }),
+    );
+    window.history.replaceState({}, "", "/reset-password#token=private-token");
+
+    render(<App client={client} />);
+    await user.type(screen.getByLabelText(/^new password$/i), "UpdatedPassword123!");
+    await user.type(screen.getByLabelText(/confirm new password/i), "UpdatedPassword123!");
+    await user.click(screen.getByRole("button", { name: /^reset password$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy);
+    expect(document.body).not.toHaveTextContent("sensitive backend message");
+    expect(document.body).not.toHaveTextContent("private-token");
+  });
+
+  it("verifies email only after an explicit action and removes its fragment", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const rawToken = "verify.header.payload.signature";
+    window.history.replaceState({}, "", `/verify-email#token=${rawToken}`);
+
+    render(<App client={client} />);
+
+    expect(window.location.hash).toBe("");
+    expect(client.confirmEmailVerification).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveTextContent(rawToken);
+    await user.click(screen.getByRole("button", { name: /^verify email$/i }));
+
+    expect(client.confirmEmailVerification).toHaveBeenCalledWith({ token: rawToken });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Your email is verified.",
+    );
+  });
+
+  it("reconciles verification against the authenticated account instead of inferring it from the link", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const unverifiedSession = {
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    };
+    sessionStorage.setItem("smart-task-session", JSON.stringify(unverifiedSession));
+    client.getCurrentUser.mockResolvedValue(unverifiedSession.user);
+    window.history.replaceState({}, "", "/verify-email#token=another-accounts-token");
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /^verify email$/i }));
+
+    await waitFor(() => expect(client.getCurrentUser).toHaveBeenCalledWith({ token: "jwt-token" }));
+    expect(JSON.parse(sessionStorage.getItem("smart-task-session"))).toEqual(unverifiedSession);
+  });
+
+  it("does not clear a newer session when a delayed password reset completes after navigation", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const secondSession = {
+      token: "second-user-token",
+      user: {
+        id: 22,
+        username: "second-user",
+        fullName: "Second User",
+        email: "second@example.com",
+        emailVerified: false,
+      },
+    };
+    let resolveReset;
+    client.confirmPasswordReset.mockReturnValue(new Promise((resolve) => {
+      resolveReset = resolve;
+    }));
+    client.login.mockResolvedValue(secondSession);
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    window.history.replaceState({}, "", "/reset-password#token=reset-token");
+
+    render(<App client={client} />);
+    await user.type(screen.getByLabelText(/^new password$/i), "UpdatedPassword123!");
+    await user.type(screen.getByLabelText(/confirm new password/i), "UpdatedPassword123!");
+    await user.click(screen.getByRole("button", { name: /^reset password$/i }));
+    await user.click(screen.getByRole("button", { name: /return to sign in/i }));
+    await screen.findByRole("heading", { name: /^account$/i });
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+    await screen.findByRole("heading", { name: /enter the project workshop/i });
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    await screen.findByText("Second User");
+
+    await act(async () => {
+      resolveReset(null);
+    });
+
+    expect(sessionStorage.getItem("smart-task-session")).toContain("second-user-token");
+    expect(screen.getByText("Second User")).toBeInTheDocument();
+  });
+
+  it("does not update a newer session when delayed email verification completes after navigation", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const firstSession = {
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    };
+    const secondSession = {
+      token: "second-user-token",
+      user: {
+        id: 22,
+        username: "second-user",
+        fullName: "Second User",
+        email: "second@example.com",
+        emailVerified: false,
+      },
+    };
+    let resolveVerification;
+    client.confirmEmailVerification.mockReturnValue(new Promise((resolve) => {
+      resolveVerification = resolve;
+    }));
+    client.login.mockResolvedValue(secondSession);
+    sessionStorage.setItem("smart-task-session", JSON.stringify(firstSession));
+    window.history.replaceState({}, "", "/verify-email#token=first-accounts-token");
+
+    render(<App client={client} />);
+    await user.click(screen.getByRole("button", { name: /^verify email$/i }));
+    await user.click(screen.getByRole("button", { name: /return to workspace/i }));
+    await screen.findByRole("heading", { name: /^account$/i });
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+    await screen.findByRole("heading", { name: /enter the project workshop/i });
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    await screen.findByText("Second User");
+
+    await act(async () => {
+      resolveVerification(null);
+    });
+
+    expect(JSON.parse(sessionStorage.getItem("smart-task-session"))).toEqual(secondSession);
+    expect(screen.getByText("Second User")).toBeInTheDocument();
+  });
+
+  it("does not start private workspace requests while presenting an action link", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    window.history.replaceState({}, "", "/verify-email#token=private-token");
+
+    render(<StrictMode><App client={client} /></StrictMode>);
+    await act(async () => {});
+
+    expect(window.location.hash).toBe("");
+    expect(client.getCurrentUser).not.toHaveBeenCalled();
+    expect(client.getGenerationRuns).not.toHaveBeenCalled();
+    expect(client.confirmEmailVerification).not.toHaveBeenCalled();
+  });
+
+  it("validates a stored session before restoring the workspace", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getCurrentUser.mockResolvedValue({
+      ...authenticatedUser.user,
+      fullName: "Validated Profile",
+    });
+
+    render(<App client={client} />);
+
+    expect(await screen.findByText("Validated Profile")).toBeInTheDocument();
+    expect(client.getCurrentUser).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getGenerationRuns).toHaveBeenCalledWith({ token: "jwt-token" });
+  });
+
+  it("renews a stale stored access token before loading private workspace data", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getCurrentUser.mockRejectedValue(new ApiError("Unauthorized", { status: 401 }));
+    client.refreshSession.mockResolvedValue({
+      token: "restored-token",
+      user: { ...authenticatedUser.user, fullName: "Restored Profile" },
+    });
+
+    render(<App client={client} />);
+
+    expect(await screen.findByText("Restored Profile")).toBeInTheDocument();
+    expect(client.refreshSession).toHaveBeenCalledTimes(1);
+    expect(client.getGenerationRuns).toHaveBeenCalledWith({ token: "restored-token" });
+    expect(sessionStorage.getItem("smart-task-session")).toContain("restored-token");
+  });
+
+  it("refreshes an expired access token and retries the protected action once", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.generateProject
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(generatedDraft);
+    client.refreshSession.mockResolvedValue({
+      token: "renewed-token",
+      user: authenticatedUser.user,
+    });
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    const prompt = "Build a home renovation plan for redesigning and delivering a new kitchen";
+    await user.type(screen.getByLabelText(/describe your project/i), prompt);
+    await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+
+    expect(await screen.findByRole("heading", { name: "Kitchen Redesign Project" }))
+      .toBeInTheDocument();
+    expect(client.refreshSession).toHaveBeenCalledTimes(1);
+    expect(client.generateProject).toHaveBeenNthCalledWith(1, { token: "jwt-token", prompt });
+    expect(client.generateProject).toHaveBeenNthCalledWith(2, { token: "renewed-token", prompt });
+    expect(sessionStorage.getItem("smart-task-session")).toContain("renewed-token");
+  });
+
+  it("uses one refresh when a grouped protected request expires", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveRefresh;
+    client.getProjectTasks
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(savedProjectTasks);
+    client.getProjectMembers
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockResolvedValueOnce(projectMembers);
+    client.refreshSession.mockReturnValue(new Promise((resolve) => {
+      resolveRefresh = resolve;
+    }));
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await waitFor(() => expect(client.refreshSession).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      resolveRefresh({ token: "renewed-token", user: authenticatedUser.user });
+    });
+
+    await waitFor(() => expect(client.getProjectTasks).toHaveBeenCalledTimes(2));
+    expect(client.getProjectTasks).toHaveBeenLastCalledWith({
+      token: "renewed-token",
+      projectId: 20,
+    });
+    expect(client.getProjectMembers).toHaveBeenLastCalledWith({
+      token: "renewed-token",
+      projectId: 20,
+    });
+  });
+
+  it("clears a stored session when neither access nor refresh token is valid", async () => {
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getCurrentUser.mockRejectedValue(new ApiError("Unauthorized", { status: 401 }));
+    client.refreshSession.mockRejectedValue(
+      new ApiError("Refresh token is invalid or expired", { status: 401 }),
+    );
+
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /your session expired\. sign in again/i,
+    );
+    expect(sessionStorage.getItem("smart-task-session")).toBeNull();
+  });
+
+  it("shows honest progress while generating and then displays the draft", async () => {
+    const user = userEvent.setup();
+    let resolveGeneration;
+    const client = createClient();
+    client.generateProject.mockReturnValue(
+      new Promise((resolve) => {
+        resolveGeneration = resolve;
+      }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    const prompt = "Build a home renovation plan for redesigning and delivering a new kitchen";
+    await user.type(screen.getByLabelText(/describe your project/i), prompt);
+    await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/building your first backlog/i);
+    expect(screen.getByRole("button", { name: /generating/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /generating/i })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+
+    await act(async () => {
+      resolveGeneration(generatedDraft);
+    });
+
+    expect(await screen.findByRole("heading", { name: "Kitchen Redesign Project" })).toBeInTheDocument();
+    expect(client.generateProject).toHaveBeenCalledWith({ token: "jwt-token", prompt });
+  });
+
+  it("generates an immediate draft from a three-character brief", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.type(screen.getByLabelText(/describe your project/i), "CRM");
+    const generateButton = screen.getByRole("button", { name: /generate first plan/i });
+
+    expect(generateButton).toBeEnabled();
+    await user.click(generateButton);
+
+    expect(await screen.findByRole("heading", { name: "Kitchen Redesign Project" }))
+      .toBeInTheDocument();
+    expect(client.generateProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      prompt: "CRM",
+    });
+  });
+
+  it("keeps the prompt available when generation fails", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.generateProject.mockRejectedValue(
+      new ApiError("AI planning service is unavailable", { status: 502 }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    const prompt = "Build a home renovation plan for redesigning and delivering a new kitchen";
+    const promptField = screen.getByLabelText(/describe your project/i);
+    await user.type(promptField, prompt);
+    await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("AI planning service is unavailable");
+    expect(promptField).toHaveValue(prompt);
+    await waitFor(() => expect(client.getGenerationRuns).toHaveBeenCalledTimes(2));
+  });
+
+  it("restores a persisted draft after an authenticated page refresh", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns.mockResolvedValue([readyPlanningRun]);
+    client.getGenerationRun.mockResolvedValue({
+      ...readyPlanningRun,
+      ...generatedDraft,
+      runId: readyPlanningRun.runId,
+    });
+
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("heading", { name: /recent ai plans/i }))
+      .toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /resume draft/i }));
+
+    expect(client.getGenerationRun).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-ready",
+    });
+    expect(await screen.findByRole("heading", { name: "Kitchen Redesign Project" }))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText(/describe your project/i)).toHaveValue(
+      readyPlanningRun.prompt,
+    );
+  });
+
+  it("retries a failed existing-ticket run with its saved planning context", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns.mockResolvedValue([failedExistingPlanningRun]);
+    client.retryGenerationRun.mockResolvedValue({
+      ...generatedDraft,
+      runId: failedExistingPlanningRun.runId,
+    });
+
+    render(<App client={client} />);
+
+    await user.click(await screen.findByRole("button", { name: /retry plan/i }));
+
+    expect(client.retryGenerationRun).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-failed",
+    });
+    expect(await screen.findByLabelText(/refined ticket title/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/planning target/i)).toHaveTextContent(
+      "Job Application Tracker - Initial Backlog",
+    );
+    expect(screen.getByLabelText(/planning target/i)).toHaveTextContent(
+      "Create opportunity intake",
+    );
+  });
+
+  it("keeps the Workshop usable when recent planning history cannot load", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns.mockRejectedValueOnce(
+      new ApiError("Could not load recent plans", { status: 500 }),
+    );
+
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load recent plans");
+    expect(screen.getByRole("heading", { name: /what are we building/i }))
+      .toBeInTheDocument();
+    client.getGenerationRuns.mockResolvedValue([]);
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    expect(await screen.findByText(/no saved ai plans yet/i)).toBeInTheDocument();
+  });
+
+  it("ignores planning history that resolves after its session was replaced", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveOldHistory;
+    sessionStorage.setItem("smart-task-session", JSON.stringify(authenticatedUser));
+    client.getGenerationRuns
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveOldHistory = resolve;
+      }))
+      .mockResolvedValueOnce([]);
+
+    render(<App client={client} />);
+    await user.click(await screen.findByRole("button", { name: /log out/i }));
+    await logIn(user, client);
+    await waitFor(() => expect(client.getGenerationRuns).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      resolveOldHistory([readyPlanningRun]);
+    });
+
+    expect(screen.queryByRole("button", { name: /resume draft/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("ignores a protected response that resolves after another account signs in", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveOldGeneration;
+    client.generateProject.mockReturnValue(new Promise((resolve) => {
+      resolveOldGeneration = resolve;
+    }));
+    client.login
+      .mockResolvedValueOnce(authenticatedUser)
+      .mockResolvedValueOnce({
+        token: "second-user-token",
+        user: { id: 22, username: "second-user", fullName: "Second User" },
+      });
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.type(
+      screen.getByLabelText(/describe your project/i),
+      "Build a complete project that belongs only to the first account",
+    );
+    await user.click(screen.getByRole("button", { name: /generate first plan/i }));
+    await user.click(screen.getByRole("button", { name: /log out/i }));
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    expect(await screen.findByText("Second User")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveOldGeneration(generatedDraft);
+    });
+
+    expect(screen.queryByRole("heading", { name: "Kitchen Redesign Project" }))
+      .not.toBeInTheDocument();
+    expect(sessionStorage.getItem("smart-task-session")).toContain("second-user-token");
+  });
+
+  it("shows quality evidence and lets the user edit ticket content", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const weakDraft = structuredClone(generatedDraft);
+    weakDraft.quality = {
+      ...weakDraft.quality,
+      score: 65,
+      passed: false,
+      issues: [
+        {
+          code: "missing_explicit_capabilities",
+          message: "Tickets must explicitly implement contractor selection",
+          ticket_ids: [],
+        },
+      ],
+    };
+    client.generateProject.mockResolvedValue(weakDraft);
+    render(<App client={client} />);
+
+    await generateDraft(user, client);
+
+    expect(screen.getByText(/needs attention/i)).toBeInTheDocument();
+    expect(screen.getByText("65 / 100")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: /plan quality/i })).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: /quality score/i })).toHaveAttribute(
+      "aria-valuenow",
+      "65",
+    );
+    expect(
+      screen.getByText(/tickets must explicitly implement contractor selection/i),
+    ).toBeInTheDocument();
+
+    const firstTitle = screen.getByLabelText(/title for ticket 1/i);
+    await user.clear(firstTitle);
+    await user.type(firstTitle, "Document kitchen requirements with the homeowner");
+    expect(firstTitle).toHaveValue("Document kitchen requirements with the homeowner");
+  });
+
+  it("confirms the edited draft and reports the created project", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmProject.mockResolvedValue({
+      runId: "run-1",
+      projectId: 42,
+      projectName: "Kitchen Redesign Project",
+      taskIds: [101, 102, 103],
+      alreadyConfirmed: false,
+    });
+    render(<App client={client} />);
+    await generateDraft(user, client);
+
+    const firstTitle = screen.getByLabelText(/title for ticket 1/i);
+    await user.clear(firstTitle);
+    await user.type(firstTitle, "Document kitchen requirements with the homeowner");
+    expect(screen.getByRole("heading", { name: /open decisions/i })).toBeInTheDocument();
+    expect(screen.getByText(/you can confirm this draft now/i)).toBeInTheDocument();
+    const firstQuestion = screen.getByLabelText(/open question 1/i);
+    await user.clear(firstQuestion);
+    await user.type(firstQuestion, "Should work pause while the family is traveling?");
+    const confirmButton = screen.getByRole("button", { name: /confirm and create project/i });
+    const invalidFieldIds = Array.from(confirmButton.closest("form").elements)
+      .filter((field) => !field.checkValidity())
+      .map((field) => field.id);
+    expect(invalidFieldIds).toEqual([]);
+    await user.click(confirmButton);
+
+    expect(client.confirmProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-1",
+      draft: expect.objectContaining({
+        openQuestions: [
+          "Should work pause while the family is traveling?",
+          "Is there a fixed budget ceiling for the first release?",
+        ],
+        tickets: expect.arrayContaining([
+          expect.objectContaining({
+            client_id: "design-kitchen",
+            title: "Document kitchen requirements with the homeowner",
+          }),
+        ]),
+      }),
+    });
+    expect(await screen.findByRole("heading", { name: /project created/i })).toBeInTheDocument();
+    expect(screen.getByText(/project #42/i)).toBeInTheDocument();
+    expect(screen.getByText(/3 tickets/i)).toBeInTheDocument();
+  });
+
+  it("opens the projects section and loads one project's ticket details", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+
+    expect(await screen.findByRole("heading", { name: /your projects/i })).toBeInTheDocument();
+    expect(client.getProjects).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(screen.getAllByText(/6 tickets/i)).toHaveLength(2);
+
+    await user.click(
+      screen.getByRole("button", { name: /job application tracker - initial backlog/i }),
+    );
+
+    expect(client.getProjectTasks).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Create opportunity intake" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("4.5 hours")).toBeInTheDocument();
+    expect(
+      screen.getByText("A saved opportunity includes company, role, and source"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Aug 14, 2026")).toBeInTheDocument();
+    expect(screen.getByText("opportunity-intake")).toBeInTheDocument();
+  });
+
+  it("creates a project manually without invoking AI", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+    await screen.findByRole("heading", { name: /your projects/i });
+    await user.click(screen.getByRole("button", { name: /new project/i }));
+    const projectName = screen.getByLabelText(/project name/i);
+    expect(projectName).toHaveAttribute("maxLength", "150");
+    await user.type(projectName, "Release checklist");
+    await user.type(screen.getByLabelText(/^objective$/i), "Ship the next release with confidence");
+    await user.click(screen.getByRole("button", { name: /^create project$/i }));
+
+    expect(client.createProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      project: {
+        name: "Release checklist",
+        objective: "Ship the next release with confidence",
+      },
+    });
+    expect(client.generateProject).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { name: "Release checklist" }))
+      .toBeInTheDocument();
+  });
+
+  it("announces the selected navigation and project loading state", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveProjects;
+    client.getProjects.mockReturnValue(
+      new Promise((resolve) => {
+        resolveProjects = resolve;
+      }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    const projectsButton = screen.getByRole("button", { name: /^projects$/i });
+    await user.click(projectsButton);
+
+    expect(projectsButton).toHaveAttribute("aria-current", "page");
+    const projectsSection = screen.getByRole("heading", { name: /your projects/i })
+      .closest("section");
+    expect(projectsSection).toHaveAttribute("aria-busy", "true");
+
+    await act(async () => {
+      resolveProjects(savedProjects);
+    });
+
+    expect(projectsSection).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("shows an empty project index", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue([]);
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+
+    expect(await screen.findByText(/no projects yet/i)).toBeInTheDocument();
+  });
+
+  it("keeps project navigation available when the index request fails", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockRejectedValue(
+      new ApiError("Could not load projects", { status: 500 }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not load projects");
+    expect(screen.getByRole("button", { name: /^workshop$/i })).toBeInTheDocument();
+  });
+
+  it("does not describe a failed backlog request as an empty project", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectTasks.mockRejectedValue(
+      new ApiError("Could not load the project backlog", { status: 500 }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: /job application tracker - initial backlog/i,
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not load the project backlog",
+    );
+    expect(screen.queryByText(/no tickets in this project/i)).not.toBeInTheDocument();
+  });
+
+  it("opens a newly confirmed project from the creation receipt", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmProject.mockResolvedValue({
+      runId: "run-1",
+      projectId: 42,
+      projectName: "Kitchen Redesign Project",
+      taskIds: [101, 102, 103],
+      alreadyConfirmed: false,
+    });
+    client.getProjects.mockResolvedValue([
+      {
+        ...savedProjects[0],
+        id: 42,
+        name: "Kitchen Redesign Project",
+        taskCount: 3,
+      },
+    ]);
+    render(<App client={client} />);
+    await generateDraft(user, client);
+    await user.click(screen.getByRole("button", { name: /confirm and create project/i }));
+
+    await user.click(await screen.findByRole("button", { name: /view project/i }));
+
+    expect(client.getProjects).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getProjectTasks).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 42,
+    });
+    expect(await screen.findByRole("heading", { name: "Create opportunity intake" }))
+      .toBeInTheDocument();
+  });
+
+  it("opens a project board and saves ticket edits from the detail panel", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+
+    expect(await screen.findByRole("heading", { name: /project board/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^todo$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /in progress/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^blocked$/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^done$/i })).toBeInTheDocument();
+    expect(client.getProjects).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getProjectTasks).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /open create opportunity intake/i }),
+    );
+
+    expect(screen.getByRole("dialog", { name: /edit create opportunity intake/i }))
+      .toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: /edit create opportunity intake/i }))
+      .not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /open create opportunity intake/i }),
+    );
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    const title = within(panel).getByLabelText(/^title$/i);
+    await user.clear(title);
+    await user.type(title, "Capture qualified opportunity details");
+    await user.selectOptions(within(panel).getByLabelText(/^status$/i), "IN_PROGRESS");
+    await user.clear(within(panel).getByLabelText(/due date/i));
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 201,
+      task: expect.objectContaining({
+        title: "Capture qualified opportunity details",
+        status: "IN_PROGRESS",
+        projectId: 20,
+        dueDate: null,
+      }),
+    });
+    expect(await screen.findByText("Capture qualified opportunity details"))
+      .toBeInTheDocument();
+  });
+
+  it("plans one existing ticket with project context and returns to the same board", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.confirmProject.mockResolvedValue({
+      runId: "run-1",
+      projectId: 20,
+      projectName: "Job Application Tracker - Initial Backlog",
+      taskIds: [301, 302, 303],
+      alreadyConfirmed: false,
+    });
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(
+      screen.getByRole("button", { name: /open create opportunity intake/i }),
+    );
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    await user.click(within(panel).getByRole("button", { name: /plan with ai/i }));
+
+    expect(screen.getByRole("button", { name: /^workshop$/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("heading", { name: /plan this ticket/i })).toBeInTheDocument();
+    expect(screen.getByText("Job Application Tracker - Initial Backlog")).toBeInTheDocument();
+    expect(screen.getByText("Create opportunity intake")).toBeInTheDocument();
+    expect(screen.getByText(/nothing changes until confirmation/i)).toBeInTheDocument();
+
+    const instructions = screen.getByLabelText(/planning instructions/i);
+    expect(instructions.value).toContain("actionable implementation plan");
+    await user.click(screen.getByRole("button", { name: /generate task plan/i }));
+
+    expect(client.generateTaskPlan).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      taskId: 201,
+      prompt: instructions.value,
+    });
+    expect(await screen.findByLabelText(/refined ticket title/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /confirm and add tickets/i }));
+
+    expect(client.confirmProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      runId: "run-1",
+      draft: generatedDraft.draft,
+    });
+    expect(await screen.findByRole("heading", { name: /ticket plan added/i }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/3 child tickets/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /open project board/i }));
+
+    expect(client.getProjectTasks).toHaveBeenLastCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    expect(await screen.findByRole("heading", { name: /project board/i }))
+      .toBeInTheDocument();
+  });
+
+  it("creates a manual ticket and deletes it only after confirmation", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /add ticket/i }));
+    await user.type(screen.getByLabelText(/ticket title/i), "Prepare release notes");
+    await user.type(
+      screen.getByLabelText(/ticket description/i),
+      "Summarize changes and operator actions for the release.",
+    );
+    await user.selectOptions(screen.getByLabelText(/ticket priority/i), "HIGH");
+    await user.type(screen.getByLabelText(/ticket category/i), "Release");
+    await user.type(screen.getByLabelText(/ticket due date/i), "2026-08-22");
+    await user.click(screen.getByRole("button", { name: /^create ticket$/i }));
+
+    expect(client.createTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      task: {
+        title: "Prepare release notes",
+        description: "Summarize changes and operator actions for the release.",
+        status: "TODO",
+        projectId: 20,
+        assigneeId: null,
+        priority: "HIGH",
+        category: "Release",
+        dueDate: "2026-08-22",
+        position: null,
+      },
+    });
+    expect(await screen.findByText("Prepare release notes")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open prepare release notes/i }));
+    const panel = screen.getByRole("dialog", { name: /edit prepare release notes/i });
+    await user.click(within(panel).getByRole("button", { name: /^delete ticket$/i }));
+    expect(within(panel).getByText(/permanently removes this ticket/i)).toBeInTheDocument();
+    expect(client.deleteTask).not.toHaveBeenCalled();
+    await user.click(within(panel).getByRole("button", { name: /yes, delete ticket/i }));
+
+    expect(client.deleteTask).toHaveBeenCalledWith({ token: "jwt-token", taskId: 203 });
+    expect(screen.queryByText("Prepare release notes")).not.toBeInTheDocument();
+  });
+
+  it("loads only the authenticated user's assigned queue into My Work", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /my work/i }));
+
+    expect(await screen.findByRole("heading", { name: /my work/i })).toBeInTheDocument();
+    expect(client.getMyWork).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(client.getProjects).not.toHaveBeenCalled();
+    expect(client.getProjectTasks).not.toHaveBeenCalled();
+    expect(await screen.findByText("Repair the reservation handoff")).toBeInTheDocument();
+    expect(screen.getByText("Catalog the remaining hand tools")).toBeInTheDocument();
+    expect(screen.queryByText("Create opportunity intake")).not.toBeInTheDocument();
+    const overdueTicket = screen.getByRole("button", {
+      name: /open reconcile the inventory audit/i,
+    });
+    expect(within(overdueTicket).getByText(/^overdue$/i)).toBeInTheDocument();
+    await user.click(overdueTicket);
+    const personalTicket = screen.getByRole("dialog", { name: /edit reconcile the inventory audit/i });
+    expect(within(personalTicket).queryByLabelText(/^assignee$/i)).not.toBeInTheDocument();
+    expect(within(personalTicket).queryByLabelText(/^priority$/i)).not.toBeInTheDocument();
+    expect(within(personalTicket).queryByRole("button", { name: /delete ticket/i }))
+      .not.toBeInTheDocument();
+    expect(within(personalTicket).queryByRole("button", { name: /plan with ai/i }))
+      .not.toBeInTheDocument();
+    await user.click(within(personalTicket).getByRole("button", { name: /close ticket/i }));
+    expect(screen.getByRole("heading", { name: /blocked/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /due next/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Job Application Tracker - Initial Backlog").length)
+      .toBeGreaterThan(0);
+    expect(screen.getAllByText("Neighborhood Tool Lending Library - Phase 1").length)
+      .toBeGreaterThan(0);
+  });
+
+  it("manages project participants and assigns a ticket to a member", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(client.getProjectMembers).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    const peoplePanel = screen.getByLabelText(/project participants/i);
+    expect(within(peoplePanel).getByText("Pablo Local Tester")).toBeInTheDocument();
+    expect(within(peoplePanel).getByText("Bob Builder")).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/participant username/i), "carol");
+    await user.click(screen.getByRole("button", { name: /add participant/i }));
+
+    expect(client.addProjectMember).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      username: "carol",
+    });
+    expect(await screen.findByText("Carol Coordinator")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const ticketPanel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    await user.selectOptions(within(ticketPanel).getByLabelText(/^assignee$/i), "2");
+    await user.click(within(ticketPanel).getByRole("button", { name: /save ticket/i }));
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 201,
+      task: expect.objectContaining({ assigneeId: 2 }),
+    });
+
+    await user.click(screen.getByRole("button", { name: /remove bob builder/i }));
+    expect(screen.getByText(/unassigns their tickets from this project/i)).toBeInTheDocument();
+    expect(client.removeProjectMember).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /^remove participant$/i }));
+
+    expect(client.removeProjectMember).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      userId: 2,
+    });
+    expect(within(peoplePanel).queryByText("Bob Builder")).not.toBeInTheDocument();
+  });
+
+  it("opens an honest AI follow-up brief from the project desk", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /project settings/i }));
+    expect(screen.getByLabelText(/project settings form/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /plan next phase/i }));
+
+    expect(screen.getByText(/does not modify this project/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /open follow-up brief/i }));
+
+    expect(screen.getByRole("button", { name: /^workshop$/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByLabelText(/describe your project/i).value).toContain(
+      "Job Application Tracker - Initial Backlog",
+    );
+  });
+
+  it("edits and explicitly confirms deletion of an owned project", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /project settings/i }));
+    const name = screen.getByLabelText(/project name/i);
+    expect(name).toHaveAttribute("maxLength", "150");
+    await user.clear(name);
+    await user.type(name, "Job search command center");
+    const objective = screen.getByLabelText(/^objective$/i);
+    await user.clear(objective);
+    await user.type(objective, "Track every application and next action");
+    await user.click(screen.getByRole("button", { name: /save project/i }));
+
+    expect(client.updateProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+      project: {
+        name: "Job search command center",
+        objective: "Track every application and next action",
+      },
+    });
+    expect((await screen.findAllByText("Job search command center")).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: /^delete project$/i }));
+    expect(screen.getByText(/deletes every ticket in this project/i)).toBeInTheDocument();
+    expect(client.deleteProject).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /yes, delete project/i }));
+
+    expect(client.deleteProject).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: 20,
+    });
+    expect(screen.queryByText("Job search command center")).not.toBeInTheDocument();
+  });
+
+  it("fails closed when a visible project has no recognized current role", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue(savedProjects.map((project) => ({
+      ...project,
+      currentUserRole: undefined,
+    })));
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(screen.queryByRole("button", { name: /add ticket/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /people/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plan next phase/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /project settings/i })).not.toBeInTheDocument();
+  });
+
+  it("gives managers ticket, ordinary-member, and AI controls but not project settings", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue(savedProjects.map((project) => ({
+      ...project,
+      currentUserRole: "MANAGER",
+    })));
+    client.getProjectMembers.mockResolvedValue([
+      {
+        userId: 1,
+        username: "alice",
+        fullName: "Alice Owner",
+        role: "OWNER",
+      },
+      {
+        userId: 18,
+        username: "pablo-local",
+        fullName: "Pablo Local Tester",
+        role: "MANAGER",
+      },
+      projectMembers[1],
+    ]);
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(screen.getByRole("button", { name: /add ticket/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /plan next phase/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /project settings/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    expect(screen.getByRole("button", { name: /remove bob builder/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove alice owner/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove pablo local tester/i }))
+      .not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    expect(within(panel).getByLabelText(/^priority$/i)).toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^assignee$/i)).toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^category$/i)).toBeEnabled();
+    expect(within(panel).getByLabelText(/^due date$/i)).toBeEnabled();
+    expect(within(panel).getByRole("button", { name: /delete ticket/i })).toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: /plan with ai/i })).toBeInTheDocument();
+  });
+
+  it("lets members edit only their assigned ticket without owner-controlled fields", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjects.mockResolvedValue(savedProjects.map((project) => ({
+      ...project,
+      currentUserRole: "MEMBER",
+    })));
+    client.getProjectTasks.mockResolvedValue([
+      { ...savedProjectTasks[0], assigneeId: 18, assigneeUsername: "pablo-local" },
+      savedProjectTasks[1],
+    ]);
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    expect(screen.queryByRole("button", { name: /add ticket/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /plan next phase/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /project settings/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    expect(screen.queryByLabelText(/participant username/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove bob builder/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    expect(within(panel).getByLabelText(/^title$/i)).toBeEnabled();
+    expect(within(panel).getByLabelText(/^status$/i)).toBeEnabled();
+    expect(within(panel).queryByLabelText(/^priority$/i)).not.toBeInTheDocument();
+    expect(within(panel).queryByLabelText(/^category$/i)).not.toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^due date$/i)).toBeDisabled();
+    expect(within(panel).queryByLabelText(/^assignee$/i)).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /delete ticket/i }))
+      .not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: /plan with ai/i }))
+      .not.toBeInTheDocument();
+    await user.clear(within(panel).getByLabelText(/^title$/i));
+    await user.type(within(panel).getByLabelText(/^title$/i), "Refine opportunity intake");
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 201,
+      task: expect.objectContaining({
+        title: "Refine opportunity intake",
+        priority: "HIGH",
+        assigneeId: 18,
+        position: 0,
+      }),
+    });
+
+    await user.click(screen.getByRole("button", { name: /open track application stages/i }));
+    const readOnlyPanel = screen.getByRole("dialog", { name: /view track application stages/i });
+    expect(within(readOnlyPanel).getByLabelText(/^title$/i)).toHaveAttribute("readOnly");
+    expect(within(readOnlyPanel).queryByRole("button", { name: /save ticket/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps a forbidden ticket mutation inline without losing the draft", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.updateTask.mockRejectedValue(new ApiError("Forbidden", { status: 403 }));
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+    await user.click(screen.getByRole("button", { name: /open create opportunity intake/i }));
+    const panel = screen.getByRole("dialog", { name: /edit create opportunity intake/i });
+    const title = within(panel).getByLabelText(/^title$/i);
+    await user.clear(title);
+    await user.type(title, "Draft that must survive denial");
+
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+
+    expect(await within(panel).findByRole("alert")).toHaveTextContent(
+      "You do not have permission to change this ticket.",
+    );
+    expect(title).toHaveValue("Draft that must survive denial");
+    expect(within(panel).queryByRole("button", { name: /^try again$/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("preserves required owner-controlled fields when saving assigned work", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /my work/i }));
+    await user.click(await screen.findByRole("button", {
+      name: /open reconcile the inventory audit/i,
+    }));
+    const panel = screen.getByRole("dialog", { name: /edit reconcile the inventory audit/i });
+    const title = within(panel).getByLabelText(/^title$/i);
+    expect(within(panel).queryByLabelText(/^category$/i)).not.toBeInTheDocument();
+    expect(within(panel).getByLabelText(/^due date$/i)).toBeDisabled();
+    await user.clear(title);
+    await user.type(title, "Reconcile the assigned audit");
+
+    await user.click(within(panel).getByRole("button", { name: /save ticket/i }));
+
+    expect(client.updateTask).toHaveBeenCalledWith({
+      token: "jwt-token",
+      taskId: 303,
+      task: expect.objectContaining({
+        title: "Reconcile the assigned audit",
+        projectId: 19,
+        assigneeId: 18,
+        priority: "LOW",
+        category: "Inventory",
+        dueDate: "2000-01-01",
+        position: 2,
+      }),
+    });
+  });
+
+  it("fails closed when My Work returns a ticket no longer assigned to the current account", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getMyWork.mockResolvedValue([{
+      ...assignedWorkItems[0],
+      assigneeId: 999,
+      assigneeUsername: "another-user",
+    }]);
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /my work/i }));
+    await user.click(await screen.findByRole("button", {
+      name: /open track application stages/i,
+    }));
+
+    const panel = screen.getByRole("dialog");
+    expect(within(panel).getByLabelText(/^title$/i)).toHaveAttribute("readOnly");
+    expect(within(panel).getByLabelText(/^status$/i)).toBeDisabled();
+    expect(within(panel).queryByRole("button", { name: /save ticket/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps board tickets visible when participant loading is forbidden", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectMembers.mockRejectedValue(new ApiError("Forbidden", { status: 403 }));
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+
+    expect(await screen.findByText("Create opportunity intake")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "You do not have permission to view project participants.",
+    );
+    expect(screen.queryByRole("button", { name: /^try again$/i })).not.toBeInTheDocument();
+  });
+
+  it("offers participant retry only for a retryable load failure", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectMembers.mockRejectedValue(
+      new ApiError("Participants temporarily unavailable"),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    expect(await screen.findByText("Create opportunity intake")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Participants temporarily unavailable",
+    );
+    expect(screen.getByRole("button", { name: /^try again$/i })).toBeInTheDocument();
+  });
+
+  it("renders an honest non-retryable state when a selected project disappears", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectTasks.mockRejectedValue(
+      new ApiError("Project not found with id: 20", { status: 404 }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^projects$/i }));
+    await user.click(await screen.findByRole("button", {
+      name: /job application tracker - initial backlog/i,
+    }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This project is no longer available.",
+    );
+    expect(screen.queryByText(/no tickets in this project/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^try again$/i })).not.toBeInTheDocument();
+  });
+
+  it("shows an explicit participant empty state", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.getProjectMembers.mockResolvedValue([]);
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^board$/i }));
+    await screen.findByRole("heading", { name: /project board/i });
+
+    await user.click(screen.getByRole("button", { name: /^people$/i }));
+
+    expect(screen.getByText(/no participants are listed/i)).toBeInTheDocument();
+  });
+
+  it("shows the authenticated account and signs out from its dedicated view", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+
+    const accountTitle = await screen.findByRole("heading", { name: /account/i });
+    const account = accountTitle.closest("section");
+    expect(within(account).getByText("Pablo Local Tester")).toBeInTheDocument();
+    expect(within(account).getByText("pablo-local")).toBeInTheDocument();
+    expect(within(account).getByText("Email verified")).toBeInTheDocument();
+    expect(within(account).queryByRole("button", { name: /resend verification/i }))
+      .not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+
+    expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
+      .toBeInTheDocument();
+    expect(client.logout).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem("smart-task-session")).toBeNull();
+  });
+
+  it("shows unverified account state and accepts a generic resend request", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.login.mockResolvedValue({
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    render(<App client={client} />);
+    await logIn(user, client);
+
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    expect(screen.getByText("Verification pending")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+
+    expect(client.resendEmailVerification).toHaveBeenCalledWith({ token: "jwt-token" });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If verification is still needed, a fresh link will arrive shortly.",
+    );
+  });
+
+  it("does not show a previous account's resend result after another user signs in", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    const firstSession = {
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    };
+    const secondSession = {
+      token: "second-user-token",
+      user: {
+        id: 22,
+        username: "second-user",
+        fullName: "Second User",
+        email: "second@example.com",
+        emailVerified: false,
+      },
+    };
+    let resolveFirstResend;
+    let resolveSecondResend;
+    client.login
+      .mockResolvedValueOnce(firstSession)
+      .mockResolvedValueOnce(secondSession);
+    client.resendEmailVerification
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFirstResend = resolve;
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecondResend = resolve;
+      }));
+
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+    await screen.findByRole("heading", { name: /enter the project workshop/i });
+    await user.type(screen.getByLabelText(/username/i), "second-user");
+    await user.type(screen.getByLabelText(/password/i), "password123");
+    await user.click(screen.getByRole("button", { name: /enter workshop/i }));
+    await screen.findByText("Second User");
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+    expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+
+    await act(async () => {
+      resolveFirstResend(null);
+    });
+
+    expect(JSON.parse(sessionStorage.getItem("smart-task-session"))).toEqual(secondSession);
+    expect(screen.queryByText("If verification is still needed, a fresh link will arrive shortly."))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+
+    await act(async () => {
+      resolveSecondResend(null);
+    });
+  });
+
+  it("uses retry guidance for verification resend without rendering backend messages", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.login.mockResolvedValue({
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    client.resendEmailVerification.mockRejectedValue(
+      new ApiError("internal throttle details", {
+        status: 429,
+        retryAfterSeconds: 30,
+        retryable: true,
+      }),
+    );
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Too many requests. Try again in 30 seconds.",
+    );
+    expect(document.body).not.toHaveTextContent("internal throttle details");
+  });
+
+  it("keeps verification resend busy while an expired access token is renewed", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    let resolveResend;
+    client.login.mockResolvedValue({
+      ...authenticatedUser,
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    client.resendEmailVerification
+      .mockRejectedValueOnce(new ApiError("Unauthorized", { status: 401 }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveResend = resolve;
+      }));
+    client.refreshSession.mockResolvedValue({
+      token: "renewed-token",
+      user: { ...authenticatedUser.user, emailVerified: false },
+    });
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /resend verification email/i }));
+
+    await waitFor(() => expect(client.resendEmailVerification).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+    expect(client.resendEmailVerification).toHaveBeenNthCalledWith(2, {
+      token: "renewed-token",
+    });
+
+    await act(async () => resolveResend(null));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "If verification is still needed, a fresh link will arrive shortly.",
+    );
+  });
+
+  it("still clears local access when the logout endpoint is unavailable", async () => {
+    const user = userEvent.setup();
+    const client = createClient();
+    client.logout.mockRejectedValue(new ApiError("Cannot reach the API"));
+    render(<App client={client} />);
+    await logIn(user, client);
+    await user.click(screen.getByRole("button", { name: /^account$/i }));
+    await user.click(screen.getByRole("button", { name: /sign out of workspace/i }));
+
+    expect(await screen.findByRole("heading", { name: /enter the project workshop/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/signed out locally/i);
+    expect(sessionStorage.getItem("smart-task-session")).toBeNull();
+  });
+});

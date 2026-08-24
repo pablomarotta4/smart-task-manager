@@ -35,6 +35,9 @@ class UserServiceTest {
     @Mock
     private PasswordEncoder passwordEncoder;
 
+    @Mock
+    private RefreshTokenService refreshTokenService;
+
     @InjectMocks
     private UserService userService;
 
@@ -53,8 +56,10 @@ class UserServiceTest {
                 .id(1L)
                 .username("testuser")
                 .email("test@example.com")
+                .emailNormalized("test@example.com")
                 .password("$2a$10$encodedPassword")
                 .fullName("Test User")
+                .authVersion(0)
                 .active(true)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
@@ -66,7 +71,7 @@ class UserServiceTest {
     void testCreateUser_Success() {
         // Arrange
         when(userRepository.existsByUsername(anyString())).thenReturn(false);
-        when(userRepository.existsByEmail(anyString())).thenReturn(false);
+        when(userRepository.existsByEmailNormalized(anyString())).thenReturn(false);
         when(passwordEncoder.encode(anyString())).thenReturn("$2a$10$encodedPassword");
         when(userRepository.save(any(User.class))).thenReturn(user);
 
@@ -81,7 +86,7 @@ class UserServiceTest {
         assertTrue(response.getActive());
 
         verify(userRepository, times(1)).existsByUsername("testuser");
-        verify(userRepository, times(1)).existsByEmail("test@example.com");
+        verify(userRepository, times(1)).existsByEmailNormalized("test@example.com");
         verify(passwordEncoder, times(1)).encode("password123");
         verify(userRepository, times(1)).save(any(User.class));
     }
@@ -91,7 +96,7 @@ class UserServiceTest {
     void testCreateUser_PasswordEncryption() {
         // Arrange
         when(userRepository.existsByUsername(anyString())).thenReturn(false);
-        when(userRepository.existsByEmail(anyString())).thenReturn(false);
+        when(userRepository.existsByEmailNormalized(anyString())).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("$2a$10$encodedPassword");
         when(userRepository.save(any(User.class))).thenReturn(user);
 
@@ -105,6 +110,36 @@ class UserServiceTest {
         User savedUser = userCaptor.getValue();
         assertEquals("$2a$10$encodedPassword", savedUser.getPassword());
         assertNotEquals("password123", savedUser.getPassword());
+    }
+
+    @Test
+    void createUserNormalizesEmailAndLeavesItUnverified() {
+        userRequest.setEmail("  Test@Example.COM  ");
+        when(userRepository.existsByUsername("testuser")).thenReturn(false);
+        when(userRepository.existsByEmailNormalized("test@example.com")).thenReturn(false);
+        when(passwordEncoder.encode("password123")).thenReturn("encoded");
+        when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UserResponse response = userService.createUser(userRequest);
+
+        ArgumentCaptor<User> savedUser = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(savedUser.capture());
+        assertEquals("Test@Example.COM", savedUser.getValue().getEmail());
+        assertEquals("test@example.com", savedUser.getValue().getEmailNormalized());
+        assertNull(savedUser.getValue().getVerifiedAt());
+        assertFalse(response.getEmailVerified());
+    }
+
+    @Test
+    void userLifecycleNormalizesEmailForDirectRepositoryPersistence() {
+        User directUser = User.builder()
+                .email("  Direct@Example.COM ")
+                .build();
+
+        directUser.normalizeEmail();
+
+        assertEquals("Direct@Example.COM", directUser.getEmail());
+        assertEquals("direct@example.com", directUser.getEmailNormalized());
     }
 
     @Test
@@ -129,7 +164,7 @@ class UserServiceTest {
     void testCreateUser_DuplicateEmail() {
         // Arrange
         when(userRepository.existsByUsername(anyString())).thenReturn(false);
-        when(userRepository.existsByEmail("test@example.com")).thenReturn(true);
+        when(userRepository.existsByEmailNormalized("test@example.com")).thenReturn(true);
 
         // Act & Assert
         UserDuplicatedException exception = assertThrows(
@@ -202,30 +237,27 @@ class UserServiceTest {
     }
 
     @Test
-    @DisplayName("Should update user successfully")
+    @DisplayName("Should update the full name without changing identity")
     void testUpdateUser_Success() {
         // Arrange
         UserRequest updateRequest = new UserRequest();
-        updateRequest.setUsername("updateduser");
-        updateRequest.setEmail("updated@example.com");
-        updateRequest.setPassword("newPassword123");
+        updateRequest.setUsername("testuser");
+        updateRequest.setEmail("test@example.com");
+        updateRequest.setPassword(null);
         updateRequest.setFullName("Updated User");
 
         User updatedUser = User.builder()
                 .id(1L)
-                .username("updateduser")
-                .email("updated@example.com")
-                .password("$2a$10$newEncodedPassword")
+                .username("testuser")
+                .email("test@example.com")
+                .password("$2a$10$encodedPassword")
                 .fullName("Updated User")
                 .active(true)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(LocalDateTime.now())
                 .build();
 
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(user));
-        when(userRepository.existsByUsername("updateduser")).thenReturn(false);
-        when(userRepository.existsByEmail("updated@example.com")).thenReturn(false);
-        when(passwordEncoder.encode("newPassword123")).thenReturn("$2a$10$newEncodedPassword");
+        when(userRepository.findActiveForUpdateByUsername("testuser")).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenReturn(updatedUser);
 
         // Act
@@ -233,11 +265,11 @@ class UserServiceTest {
 
         // Assert
         assertNotNull(response);
-        assertEquals("updateduser", response.getUsername());
-        assertEquals("updated@example.com", response.getEmail());
+        assertEquals("testuser", response.getUsername());
+        assertEquals("test@example.com", response.getEmail());
         assertEquals("Updated User", response.getFullName());
-        verify(userRepository, times(1)).findByUsername("testuser");
-        verify(passwordEncoder, times(1)).encode("newPassword123");
+        verify(userRepository, times(1)).findActiveForUpdateByUsername("testuser");
+        verify(passwordEncoder, never()).encode(anyString());
         verify(userRepository, times(1)).save(any(User.class));
     }
 
@@ -251,7 +283,7 @@ class UserServiceTest {
         updateRequest.setPassword("newPassword123");
         updateRequest.setFullName("Test User");
 
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(user));
+        when(userRepository.findActiveForUpdateByUsername("testuser")).thenReturn(Optional.of(user));
         when(passwordEncoder.encode("newPassword123")).thenReturn("$2a$10$newEncodedPassword");
         when(userRepository.save(any(User.class))).thenReturn(user);
 
@@ -264,7 +296,36 @@ class UserServiceTest {
         verify(userRepository).save(userCaptor.capture());
         User savedUser = userCaptor.getValue();
         assertEquals("$2a$10$newEncodedPassword", savedUser.getPassword());
+        assertEquals(1, savedUser.getAuthVersion());
         verify(passwordEncoder, times(1)).encode("newPassword123");
+        verify(userRepository).findActiveForUpdateByUsername("testuser");
+        verify(refreshTokenService).revokeAllForUserId(1L);
+    }
+
+    @Test
+    void updateUserRejectsUsernameChanges() {
+        UserRequest updateRequest = new UserRequest();
+        updateRequest.setUsername("another-user");
+        updateRequest.setEmail("test@example.com");
+        updateRequest.setFullName("Test User");
+        when(userRepository.findActiveForUpdateByUsername("testuser")).thenReturn(Optional.of(user));
+
+        assertThrows(IllegalArgumentException.class, () -> userService.updateUser("testuser", updateRequest));
+
+        verify(userRepository, never()).save(any(User.class));
+    }
+
+    @Test
+    void updateUserRejectsEmailChanges() {
+        UserRequest updateRequest = new UserRequest();
+        updateRequest.setUsername("testuser");
+        updateRequest.setEmail("other@example.com");
+        updateRequest.setFullName("Test User");
+        when(userRepository.findActiveForUpdateByUsername("testuser")).thenReturn(Optional.of(user));
+
+        assertThrows(IllegalArgumentException.class, () -> userService.updateUser("testuser", updateRequest));
+
+        verify(userRepository, never()).save(any(User.class));
     }
 
     @Test
@@ -279,7 +340,7 @@ class UserServiceTest {
 
         String originalPassword = user.getPassword();
 
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(user));
+        when(userRepository.findActiveForUpdateByUsername("testuser")).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenReturn(user);
 
         // Act
@@ -294,7 +355,7 @@ class UserServiceTest {
     @DisplayName("Should throw exception when updating non-existent user")
     void testUpdateUser_UserNotFound() {
         // Arrange
-        when(userRepository.findByUsername("nonexistent")).thenReturn(Optional.empty());
+        when(userRepository.findActiveForUpdateByUsername("nonexistent")).thenReturn(Optional.empty());
 
         // Act & Assert
         UserNotFoundException exception = assertThrows(
@@ -307,7 +368,7 @@ class UserServiceTest {
     }
 
     @Test
-    @DisplayName("Should throw exception when updating with duplicate username")
+    @DisplayName("Should reject username changes before checking for duplicates")
     void testUpdateUser_DuplicateUsername() {
         // Arrange
         UserRequest updateRequest = new UserRequest();
@@ -315,24 +376,22 @@ class UserServiceTest {
         updateRequest.setEmail("test@example.com");
         updateRequest.setFullName("Test User");
 
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(user));
-        when(userRepository.existsByUsername("duplicateuser")).thenReturn(true);
-
-        // Act & Assert
-        UserDuplicatedException exception = assertThrows(
-                UserDuplicatedException.class,
+        when(userRepository.findActiveForUpdateByUsername("testuser")).thenReturn(Optional.of(user));
+        IllegalArgumentException exception = assertThrows(
+                IllegalArgumentException.class,
                 () -> userService.updateUser("testuser", updateRequest)
         );
 
-        assertEquals("Username already exists: duplicateuser", exception.getMessage());
+        assertEquals("Username cannot be changed", exception.getMessage());
         verify(userRepository, never()).save(any(User.class));
+        verify(userRepository, never()).existsByUsername(anyString());
     }
 
     @Test
     @DisplayName("Should delete user successfully (soft delete)")
     void testDeleteUser_Success() {
         // Arrange
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(user));
+        when(userRepository.findActiveForUpdateByUsername("testuser")).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenReturn(user);
 
         ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
@@ -344,15 +403,17 @@ class UserServiceTest {
         verify(userRepository).save(userCaptor.capture());
         User savedUser = userCaptor.getValue();
         assertFalse(savedUser.getActive());
-        verify(userRepository, times(1)).findByUsername("testuser");
+        assertEquals(1, savedUser.getAuthVersion());
+        verify(userRepository, times(1)).findActiveForUpdateByUsername("testuser");
         verify(userRepository, times(1)).save(any(User.class));
+        verify(refreshTokenService).revokeAllForUserId(1L);
     }
 
     @Test
     @DisplayName("Should throw exception when deleting non-existent user")
     void testDeleteUser_UserNotFound() {
         // Arrange
-        when(userRepository.findByUsername("nonexistent")).thenReturn(Optional.empty());
+        when(userRepository.findActiveForUpdateByUsername("nonexistent")).thenReturn(Optional.empty());
 
         // Act & Assert
         UserNotFoundException exception = assertThrows(

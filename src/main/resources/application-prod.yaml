@@ -1,0 +1,56 @@
+spring:
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: ${MAIL_SMTP_AUTH:true}
+          connectiontimeout: ${EMAIL_SMTP_CONNECTION_TIMEOUT_MS:5000}
+          timeout: ${EMAIL_SMTP_READ_TIMEOUT_MS:10000}
+          writetimeout: ${EMAIL_SMTP_WRITE_TIMEOUT_MS:10000}
+          starttls:
+            enable: true
+            required: true
+
+jwt:
+  secret: ${JWT_SECRET}
+  issuer: ${JWT_ISSUER}
+  audience: ${JWT_AUDIENCE}
+  expiration: ${JWT_EXPIRATION_MS:900000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION_MS:604800000}
+  refresh-cookie-secure: true
+
+account-action:
+  token-secret: ${ACCOUNT_ACTION_TOKEN_SECRET}
+  issuer: ${ACCOUNT_ACTION_TOKEN_ISSUER}
+  audience: ${ACCOUNT_ACTION_TOKEN_AUDIENCE}
+
+auth-rate-limit:
+  max-attempts: ${AUTH_RATE_LIMIT_MAX_ATTEMPTS:5}
+  window-seconds: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:60}
+  max-entries: ${AUTH_RATE_LIMIT_MAX_ENTRIES:10000}
+  enforcement-mode: ${AUTH_RATE_LIMIT_ENFORCEMENT_MODE}
+  single-instance-acknowledged: ${AUTH_RATE_LIMIT_SINGLE_INSTANCE_ACKNOWLEDGED:false}
+  trusted-proxies: ${AUTH_RATE_LIMIT_TRUSTED_PROXIES}
+
+email-outbox:
+  enabled: ${EMAIL_OUTBOX_ENABLED:true}
+  dispatch-delay-ms: ${EMAIL_OUTBOX_DISPATCH_DELAY_MS:1000}
+  link-base-url: ${EMAIL_LINK_BASE_URL}
+  require-secure-links: true
+  from-address: ${EMAIL_FROM_ADDRESS}
+  batch-size: ${EMAIL_OUTBOX_BATCH_SIZE:20}
+  maximum-attempts: ${EMAIL_OUTBOX_MAXIMUM_ATTEMPTS:5}
+  stale-claim-after: ${EMAIL_OUTBOX_STALE_CLAIM_AFTER:5m}
+  retry-initial-delay: ${EMAIL_OUTBOX_RETRY_INITIAL_DELAY:10s}
+  retry-maximum-delay: ${EMAIL_OUTBOX_RETRY_MAXIMUM_DELAY:15m}
+  smtp-connection-timeout: ${EMAIL_SMTP_CONNECTION_TIMEOUT_MS:5000}
+  smtp-read-timeout: ${EMAIL_SMTP_READ_TIMEOUT_MS:10000}
+  smtp-write-timeout: ${EMAIL_SMTP_WRITE_TIMEOUT_MS:10000}
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}

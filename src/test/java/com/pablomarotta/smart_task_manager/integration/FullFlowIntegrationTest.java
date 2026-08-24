@@ -16,6 +16,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import javax.sql.DataSource;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -25,22 +26,34 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest
 @AutoConfigureMockMvc
-public class FullFlowIntegrationTest {
+class FullFlowIntegrationTest extends PostgresIntegrationTest {
+
+    private final MockMvc mockMvc;
+
+    private final ObjectMapper objectMapper;
+
+    private final TaskRepository taskRepository;
+
+    private final ProjectRepository projectRepository;
+
+    private final UserRepository userRepository;
 
     @Autowired
-    private MockMvc mockMvc;
-
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    @Autowired
-    private TaskRepository taskRepository;
-
-    @Autowired
-    private ProjectRepository projectRepository;
-
-    @Autowired
-    private UserRepository userRepository;
+    FullFlowIntegrationTest(
+            DataSource dataSource,
+            MockMvc mockMvc,
+            ObjectMapper objectMapper,
+            TaskRepository taskRepository,
+            ProjectRepository projectRepository,
+            UserRepository userRepository
+    ) {
+        super(dataSource);
+        this.mockMvc = mockMvc;
+        this.objectMapper = objectMapper;
+        this.taskRepository = taskRepository;
+        this.projectRepository = projectRepository;
+        this.userRepository = userRepository;
+    }
 
     @BeforeEach
     public void setup() {
@@ -71,27 +84,27 @@ public class FullFlowIntegrationTest {
 
         // === PRUEBA DE DEDUPLICACIÓN ===
         // Intentar crear el mismo usuario otra vez
-        UserRequest userRequest = new UserRequest();
-        userRequest.setUsername("flowuser");
-        userRequest.setEmail("flowuser@example.com");
-        userRequest.setPassword("password123");
-        userRequest.setFullName("Flow User");
+        RegisterRequest duplicateUsername = new RegisterRequest();
+        duplicateUsername.setUsername("flowuser");
+        duplicateUsername.setEmail("flowuser@example.com");
+        duplicateUsername.setPassword("password123");
+        duplicateUsername.setFullName("Flow User");
 
-        mockMvc.perform(post("/api/users")
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(userRequest)))
+                        .content(objectMapper.writeValueAsString(duplicateUsername)))
                 .andExpect(status().isConflict());
 
         // Intentar crear usuario con mismo email pero distinto username
-        UserRequest userRequestSameEmail = new UserRequest();
-        userRequestSameEmail.setUsername("otheruser");
-        userRequestSameEmail.setEmail("flowuser@example.com");
-        userRequestSameEmail.setPassword("password123");
-        userRequestSameEmail.setFullName("Other User");
+        RegisterRequest duplicateEmail = new RegisterRequest();
+        duplicateEmail.setUsername("otheruser");
+        duplicateEmail.setEmail("flowuser@example.com");
+        duplicateEmail.setPassword("password123");
+        duplicateEmail.setFullName("Other User");
 
-        mockMvc.perform(post("/api/users")
+        mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(userRequestSameEmail)))
+                        .content(objectMapper.writeValueAsString(duplicateEmail)))
                 .andExpect(status().isConflict());
 
         // === 2) Crear proyecto para ese usuario ===

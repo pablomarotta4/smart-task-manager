@@ -10,6 +10,7 @@ public class UserResponse {
     private String fullName;
     private String role;
     private Boolean active;
+    private Boolean emailVerified;
     private String createdAt;
     private String updatedAt;
 }

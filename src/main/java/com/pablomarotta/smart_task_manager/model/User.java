@@ -12,6 +12,7 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 @Entity
 @Table(name = "users")
@@ -32,8 +33,18 @@ public class User {
 
     @NotBlank
     @Email
-    @Column(unique = true, nullable = false)
+    @Column(nullable = false)
     private String email;
+
+    @Column(name = "email_normalized", nullable = false, unique = true, length = 255)
+    private String emailNormalized;
+
+    @Column(name = "verified_at")
+    private LocalDateTime verifiedAt;
+
+    @Column(name = "auth_version", nullable = false)
+    @Builder.Default
+    private Integer authVersion = 0;
 
     @NotBlank
     @Column(nullable = false)
@@ -60,4 +71,14 @@ public class User {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    @PrePersist
+    @PreUpdate
+    public void normalizeEmail() {
+        if (email == null) {
+            return;
+        }
+        email = email.strip();
+        emailNormalized = email.toLowerCase(Locale.ROOT);
+    }
 }

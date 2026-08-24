@@ -1,0 +1,10 @@
+jwt:
+  secret: local-development-access-secret-do-not-use-outside-local-1234567890
+
+account-action:
+  token-secret: local-development-action-secret-do-not-use-outside-local-1234567890
+
+auth-rate-limit:
+  enforcement-mode: single-instance
+  single-instance-acknowledged: false
+  trusted-proxies: ""

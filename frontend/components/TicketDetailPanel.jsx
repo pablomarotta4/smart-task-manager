@@ -1,0 +1,284 @@
+import { useEffect, useRef, useState } from "react";
+
+const STATUSES = ["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"];
+const PRIORITIES = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+
+const labelFor = (value) => value.toLowerCase().replaceAll("_", " ");
+
+export default function TicketDetailPanel({
+  task,
+  members,
+  permissions,
+  saving,
+  deleting,
+  error,
+  onClose,
+  onSave,
+  onDelete,
+  onPlanWithAI,
+}) {
+  const closeButtonRef = useRef(null);
+  const [draft, setDraft] = useState({
+    title: task.title,
+    description: task.description ?? "",
+    status: task.status,
+    priority: task.priority ?? "MEDIUM",
+    category: task.category ?? "",
+    dueDate: task.dueDate ?? "",
+    assigneeId: task.assigneeId == null ? "" : String(task.assigneeId),
+  });
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    closeButtonRef.current?.focus();
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setDraft((current) => ({ ...current, [name]: value }));
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onSave(task.id, {
+      title: permissions.canEditTask ? draft.title.trim() : task.title,
+      description: permissions.canEditTask ? draft.description.trim() : task.description,
+      status: permissions.canChangeStatus ? draft.status : task.status,
+      projectId: task.projectId,
+      assigneeId: permissions.canAssignTask
+        ? draft.assigneeId ? Number(draft.assigneeId) : null
+        : task.assigneeId ?? null,
+      priority: permissions.canChangePriority ? draft.priority : task.priority,
+      category: permissions.canChangeCategory ? draft.category.trim() || null : task.category ?? null,
+      dueDate: permissions.canChangeDueDate ? draft.dueDate || null : task.dueDate ?? null,
+      position: task.position,
+    });
+  };
+
+  return (
+    <div className="ticket-sheet-backdrop">
+      <aside
+        className="ticket-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`edit-ticket-${task.id}`}
+      >
+        <header className="ticket-sheet-header">
+          <div>
+            <p className="section-index">Ticket #{task.id}</p>
+            <h2 id={`edit-ticket-${task.id}`}>
+              {permissions.canEditTask ? "Edit" : "View"} {task.title}
+            </h2>
+          </div>
+          <button
+            ref={closeButtonRef}
+            className="sheet-close"
+            type="button"
+            onClick={onClose}
+            aria-label="Close ticket"
+          >
+            ×
+          </button>
+        </header>
+
+        <form className="ticket-sheet-form" onSubmit={handleSubmit}>
+          <div className="field-group">
+            <label htmlFor={`ticket-title-${task.id}`}>Title</label>
+            <input
+              id={`ticket-title-${task.id}`}
+              name="title"
+              value={draft.title}
+              onChange={handleChange}
+              readOnly={!permissions.canEditTask}
+              maxLength={255}
+              required
+            />
+          </div>
+
+          <div className="field-group">
+            <label htmlFor={`ticket-description-${task.id}`}>Description</label>
+            <textarea
+              id={`ticket-description-${task.id}`}
+              name="description"
+              value={draft.description}
+              onChange={handleChange}
+              readOnly={!permissions.canEditTask}
+              rows={5}
+            />
+          </div>
+
+          <div className="ticket-sheet-fields">
+            <div className="field-group">
+              <label htmlFor={`ticket-status-${task.id}`}>Status</label>
+              <select
+                id={`ticket-status-${task.id}`}
+                name="status"
+                value={draft.status}
+                onChange={handleChange}
+                disabled={!permissions.canChangeStatus}
+              >
+                {STATUSES.map((status) => (
+                  <option key={status} value={status}>{labelFor(status)}</option>
+                ))}
+              </select>
+            </div>
+            {permissions.canChangePriority ? (
+              <div className="field-group">
+                <label htmlFor={`ticket-priority-${task.id}`}>Priority</label>
+                <select
+                  id={`ticket-priority-${task.id}`}
+                  name="priority"
+                  value={draft.priority}
+                  onChange={handleChange}
+                >
+                  {PRIORITIES.map((priority) => (
+                    <option key={priority} value={priority}>{labelFor(priority)}</option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            {permissions.canChangeCategory ? (
+              <div className="field-group">
+                <label htmlFor={`ticket-category-${task.id}`}>Category</label>
+                <input
+                  id={`ticket-category-${task.id}`}
+                  name="category"
+                  value={draft.category}
+                  onChange={handleChange}
+                  maxLength={32}
+                />
+              </div>
+            ) : null}
+            <div className="field-group">
+              <label htmlFor={`ticket-due-${task.id}`}>Due date</label>
+              <input
+                id={`ticket-due-${task.id}`}
+                name="dueDate"
+                type="date"
+                value={draft.dueDate}
+                onChange={handleChange}
+                disabled={!permissions.canChangeDueDate}
+              />
+            </div>
+            {permissions.canAssignTask && members ? (
+              <div className="field-group">
+                <label htmlFor={`ticket-assignee-${task.id}`}>Assignee</label>
+                <select
+                  id={`ticket-assignee-${task.id}`}
+                  name="assigneeId"
+                  value={draft.assigneeId}
+                  onChange={handleChange}
+                >
+                  <option value="">Unassigned</option>
+                  {members.map((member) => (
+                    <option key={member.userId} value={member.userId}>
+                      {member.fullName || member.username}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="ticket-context-strip">
+            <span>{task.category || "Uncategorized"}</span>
+            <span>{task.estimatedHours == null ? "No estimate" : `${Number(task.estimatedHours)}h estimate`}</span>
+            <span>{task.dependsOn?.length ? `${task.dependsOn.length} dependencies` : "No dependencies"}</span>
+            <span>{task.assigneeUsername ? `Assigned to ${task.assigneeUsername}` : "Unassigned"}</span>
+          </div>
+
+          {task.acceptanceCriteria?.length ? (
+            <section className="sheet-criteria" aria-labelledby={`criteria-${task.id}`}>
+              <h3 id={`criteria-${task.id}`}>Acceptance criteria</h3>
+              <ul>
+                {task.acceptanceCriteria.map((criterion) => (
+                  <li key={criterion}>{criterion}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
+          {error ? <p className="error-banner" role="alert">{error.message}</p> : null}
+
+          {permissions.canDeleteTask && onDelete && confirmingDelete ? (
+            <div
+              className="ticket-delete-confirmation"
+              role="alertdialog"
+              aria-labelledby={`delete-ticket-${task.id}`}
+            >
+              <div>
+                <h3 id={`delete-ticket-${task.id}`}>Delete {task.title}?</h3>
+                <p>This permanently removes this ticket. This action cannot be undone.</p>
+              </div>
+              <div>
+                <button
+                  className="text-action"
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  Keep ticket
+                </button>
+                <button
+                  className="danger-action is-confirm"
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => onDelete(task.id, task.projectId)}
+                >
+                  {deleting ? "Deleting ticket…" : "Yes, delete ticket"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <footer className="ticket-sheet-actions">
+            {permissions.canDeleteTask && onDelete ? (
+              <button
+                className="danger-action"
+                type="button"
+                disabled={saving || deleting}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                Delete ticket
+              </button>
+            ) : <span />}
+            <div>
+              {permissions.canPlanTask && onPlanWithAI ? (
+                <button
+                  className="text-action"
+                  type="button"
+                  disabled={saving || deleting}
+                  onClick={() => onPlanWithAI(task)}
+                >
+                  Plan with AI
+                </button>
+              ) : null}
+              <button className="text-action" type="button" onClick={onClose}>Cancel</button>
+              {permissions.canEditTask ? (
+                <button
+                  className="primary-action"
+                  type="submit"
+                  disabled={saving || deleting || !draft.title.trim()}
+                  aria-busy={saving}
+                >
+                  <span>{saving ? "Saving…" : "Save ticket"}</span>
+                  <span aria-hidden="true">↗</span>
+                </button>
+              ) : null}
+            </div>
+          </footer>
+        </form>
+      </aside>
+    </div>
+  );
+}
