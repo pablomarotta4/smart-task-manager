@@ -4,7 +4,10 @@ import {
   ASSIGNED_WORK_PERMISSIONS,
   NO_PROJECT_PERMISSIONS,
   assignedWorkPermissions,
+  canChangeProjectMemberRole,
+  canInviteProjectRole,
   canRemoveProjectMember,
+  canRevokeProjectInvitation,
   projectPermissions,
   ticketPermissions,
 } from "./projectPermissions";
@@ -118,6 +121,34 @@ describe("project permissions", () => {
         canPlanTask: true,
       }));
     }
+  });
+
+  it("derives invitation and member-role controls without trusting unknown roles", () => {
+    expect(canInviteProjectRole({ actorRole: "OWNER", invitationRole: "MANAGER" })).toBe(true);
+    expect(canInviteProjectRole({ actorRole: "OWNER", invitationRole: "MEMBER" })).toBe(true);
+    expect(canInviteProjectRole({ actorRole: "MANAGER", invitationRole: "MEMBER" })).toBe(true);
+    expect(canInviteProjectRole({ actorRole: "MANAGER", invitationRole: "MANAGER" })).toBe(false);
+    expect(canInviteProjectRole({ actorRole: "UNKNOWN", invitationRole: "MEMBER" })).toBe(false);
+
+    expect(canRevokeProjectInvitation({ actorRole: "MANAGER", invitationRole: "MEMBER" }))
+      .toBe(true);
+    expect(canRevokeProjectInvitation({ actorRole: "MANAGER", invitationRole: "MANAGER" }))
+      .toBe(false);
+    expect(canChangeProjectMemberRole({
+      actorRole: "OWNER",
+      targetRole: "MEMBER",
+      nextRole: "MANAGER",
+    })).toBe(true);
+    expect(canChangeProjectMemberRole({
+      actorRole: "MANAGER",
+      targetRole: "MEMBER",
+      nextRole: "MANAGER",
+    })).toBe(false);
+    expect(canChangeProjectMemberRole({
+      actorRole: "OWNER",
+      targetRole: "OWNER",
+      nextRole: "MEMBER",
+    })).toBe(false);
   });
 
   it("keeps assigned work explicitly editable without granting management", () => {

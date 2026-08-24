@@ -34,6 +34,7 @@ const createClient = () => ({
   getProjects: vi.fn().mockResolvedValue([ownerProject, memberProject]),
   getProjectTasks: vi.fn().mockResolvedValue([ownerTask]),
   getProjectMembers: vi.fn().mockResolvedValue([]),
+  getProjectInvitations: vi.fn().mockResolvedValue([]),
   getMyWork: vi.fn().mockResolvedValue([memberTask]),
   createProject: vi.fn(),
   updateProject: vi.fn(),
@@ -42,6 +43,9 @@ const createClient = () => ({
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
   addProjectMember: vi.fn(),
+  createProjectInvitation: vi.fn(),
+  revokeProjectInvitation: vi.fn(),
+  updateProjectMemberRole: vi.fn(),
   removeProjectMember: vi.fn(),
 });
 
@@ -77,6 +81,117 @@ describe("useProjectWorkspace", () => {
       kind: "forbidden",
       retryable: false,
     }));
+  });
+
+  it("loads members and pending invitations for the selected board", async () => {
+    const client = createClient();
+    const member = { userId: 3, username: "carol", role: "MEMBER" };
+    const invitation = {
+      invitationId: 71,
+      email: "pending@example.com",
+      role: "MEMBER",
+      state: "PENDING",
+    };
+    client.getProjectMembers.mockResolvedValue([member]);
+    client.getProjectInvitations.mockResolvedValue([invitation]);
+    const { result } = renderWorkspace({ client });
+
+    await act(() => result.current.openBoard(ownerProject.id));
+
+    expect(result.current.projectMembers).toEqual([member]);
+    expect(result.current.projectInvitations).toEqual([invitation]);
+    expect(client.getProjectInvitations).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: ownerProject.id,
+    });
+  });
+
+  it("stores an invited person without retaining the one-time invite URL", async () => {
+    const client = createClient();
+    const created = {
+      invitationId: 72,
+      projectId: ownerProject.id,
+      email: "new@example.com",
+      role: "MANAGER",
+      state: "PENDING",
+      expiresAt: "2026-08-19T12:00:00Z",
+      inviteUrl: "https://app.test/invite#token=private-token",
+    };
+    client.createProjectInvitation.mockResolvedValue(created);
+    const { result } = renderWorkspace({ client });
+    await act(() => result.current.openBoard(ownerProject.id));
+
+    let response;
+    await act(async () => {
+      response = await result.current.inviteProjectMember(ownerProject.id, {
+        email: "new@example.com",
+        role: "MANAGER",
+      });
+    });
+
+    expect(response).toEqual(created);
+    expect(result.current.projectInvitations).toEqual([{ ...created, inviteUrl: undefined }]);
+    expect(client.createProjectInvitation).toHaveBeenCalledWith({
+      token: "jwt-token",
+      projectId: ownerProject.id,
+      email: "new@example.com",
+      role: "MANAGER",
+    });
+  });
+
+  it("revokes invitations and updates member roles", async () => {
+    const client = createClient();
+    const member = { userId: 3, username: "carol", role: "MEMBER" };
+    const invitation = { invitationId: 71, email: "pending@example.com", role: "MEMBER" };
+    client.getProjectMembers.mockResolvedValue([member]);
+    client.getProjectInvitations.mockResolvedValue([invitation]);
+    client.revokeProjectInvitation.mockResolvedValue(null);
+    client.updateProjectMemberRole.mockResolvedValue({ ...member, role: "MANAGER" });
+    const { result } = renderWorkspace({ client });
+    await act(() => result.current.openBoard(ownerProject.id));
+
+    await act(() => result.current.revokeProjectInvitation(ownerProject.id, invitation));
+    await act(() => result.current.updateMemberRole(ownerProject.id, member, "MANAGER"));
+
+    expect(result.current.projectInvitations).toEqual([]);
+    expect(result.current.projectMembers).toEqual([{ ...member, role: "MANAGER" }]);
+  });
+
+  it("does not add a delayed invitation to a newly selected project", async () => {
+    const client = createClient();
+    const creation = deferred();
+    const otherInvitation = {
+      invitationId: 81,
+      email: "other@example.com",
+      role: "MEMBER",
+    };
+    client.createProjectInvitation.mockReturnValue(creation.promise);
+    client.getProjectInvitations.mockImplementation(({ projectId }) => Promise.resolve(
+      projectId === memberProject.id ? [otherInvitation] : [],
+    ));
+    const { result } = renderWorkspace({ client });
+    await act(() => result.current.openBoard(ownerProject.id));
+
+    let invite;
+    act(() => {
+      invite = result.current.inviteProjectMember(ownerProject.id, {
+        email: "old@example.com",
+        role: "MEMBER",
+      });
+    });
+    await act(() => result.current.selectProject(memberProject, { includeMembers: true }));
+    await act(async () => {
+      creation.resolve({
+        invitationId: 82,
+        email: "old@example.com",
+        role: "MEMBER",
+        inviteUrl: "https://app.test/invite#token=old",
+      });
+      await invite;
+    });
+
+    expect(result.current.selectedProject).toEqual(memberProject);
+    expect(result.current.projectInvitations).toEqual([otherInvitation]);
   });
 
   it("does not fall back or fetch details when an explicit project is invisible", async () => {

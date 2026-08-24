@@ -25,6 +25,12 @@ const STABLE_ERROR_CODES = new Set([
   "ACCOUNT_ACTION_EXPIRED",
   "ACCOUNT_ACTION_USED",
   "ACCOUNT_ACTION_SUPERSEDED",
+  "PROJECT_INVITATION_INVALID",
+  "PROJECT_INVITATION_EXPIRED",
+  "PROJECT_INVITATION_USED",
+  "PROJECT_INVITATION_REVOKED",
+  "PROJECT_INVITATION_EMAIL_MISMATCH",
+  "EMAIL_VERIFICATION_REQUIRED",
 ]);
 
 const parseRetryAfterSeconds = (response) => {
@@ -148,6 +154,41 @@ export const createApiClient = ({
         token,
         body: { username },
       }),
+    createProjectInvitation: ({ token, projectId, email, role }) =>
+      request(`/api/projects/${encodeURIComponent(projectId)}/invitations`, {
+        method: "POST",
+        token,
+        body: { email, role },
+      }),
+    getProjectInvitations: ({ token, projectId }) =>
+      request(`/api/projects/${encodeURIComponent(projectId)}/invitations`, {
+        method: "GET",
+        token,
+      }),
+    revokeProjectInvitation: ({ token, projectId, invitationId }) =>
+      request(
+        `/api/projects/${encodeURIComponent(projectId)}/invitations/`
+          + encodeURIComponent(invitationId),
+        { method: "DELETE", token },
+      ),
+    acceptProjectInvitation: ({ token, invitationToken }) =>
+      request("/api/project-invitations/accept", {
+        method: "POST",
+        token,
+        body: { token: invitationToken },
+      }),
+    declineProjectInvitation: ({ token, invitationToken }) =>
+      request("/api/project-invitations/decline", {
+        method: "POST",
+        token,
+        body: { token: invitationToken },
+      }),
+    updateProjectMemberRole: ({ token, projectId, userId, role }) =>
+      request(
+        `/api/projects/${encodeURIComponent(projectId)}/members/`
+          + `${encodeURIComponent(userId)}/role`,
+        { method: "PATCH", token, body: { role } },
+      ),
     removeProjectMember: ({ token, projectId, userId }) =>
       request(
         `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,

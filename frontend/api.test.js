@@ -479,6 +479,111 @@ describe("project API client", () => {
     );
   });
 
+  it("creates, lists, and revokes project invitations", async () => {
+    const invitation = {
+      invitationId: "invite/7",
+      projectId: "team/20",
+      email: "new.member@example.com",
+      role: "MEMBER",
+      state: "PENDING",
+      expiresAt: "2026-08-19T12:00:00Z",
+      inviteUrl: "http://app.test/invite#token=private-token",
+    };
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(invitation, 201))
+      .mockResolvedValueOnce(jsonResponse([{ ...invitation, inviteUrl: undefined }]))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.createProjectInvitation({
+      token: "jwt-token",
+      projectId: "team/20",
+      email: "new.member@example.com",
+      role: "MEMBER",
+    });
+    await client.getProjectInvitations({ token: "jwt-token", projectId: "team/20" });
+    await client.revokeProjectInvitation({
+      token: "jwt-token",
+      projectId: "team/20",
+      invitationId: "invite/7",
+    });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/projects/team%2F20/invitations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "new.member@example.com", role: "MEMBER" }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/projects/team%2F20/invitations",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      3,
+      "http://api.test/api/projects/team%2F20/invitations/invite%2F7",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("accepts and declines invitation tokens only through POST bodies", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        projectId: 20,
+        member: { userId: 18, role: "MEMBER" },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+    const invitationToken = "invite.header.payload.signature";
+
+    await client.acceptProjectInvitation({ token: "jwt-token", invitationToken });
+    await client.declineProjectInvitation({ token: "jwt-token", invitationToken });
+
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://api.test/api/project-invitations/accept",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer jwt-token" }),
+        body: JSON.stringify({ token: invitationToken }),
+      }),
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://api.test/api/project-invitations/decline",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ token: invitationToken }),
+      }),
+    );
+    expect(fetchImpl.mock.calls.map(([url]) => url).join(" ")).not.toContain(invitationToken);
+  });
+
+  it("changes a project member role with the server member contract", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({
+      userId: "user/2",
+      role: "MANAGER",
+    }));
+    const client = createApiClient({ baseUrl: "http://api.test", fetchImpl });
+
+    await client.updateProjectMemberRole({
+      token: "jwt-token",
+      projectId: "team/20",
+      userId: "user/2",
+      role: "MANAGER",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://api.test/api/projects/team%2F20/members/user%2F2/role",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ role: "MANAGER" }),
+      }),
+    );
+  });
+
   it("loads the principal queue and assigns tickets", async () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(jsonResponse([{ id: 201, assigneeUsername: "alice" }]))

@@ -123,3 +123,20 @@ export const canRemoveProjectMember = ({ actorRole, targetRole }) => {
   if (actorRole === "OWNER") return targetRole === "MANAGER" || targetRole === "MEMBER";
   return actorRole === "MANAGER" && targetRole === "MEMBER";
 };
+
+export const canInviteProjectRole = ({ actorRole, invitationRole }) => {
+  if (actorRole === "OWNER") {
+    return invitationRole === "MANAGER" || invitationRole === "MEMBER";
+  }
+  return actorRole === "MANAGER" && invitationRole === "MEMBER";
+};
+
+export const canRevokeProjectInvitation = ({ actorRole, invitationRole }) => (
+  canInviteProjectRole({ actorRole, invitationRole })
+);
+
+export const canChangeProjectMemberRole = ({ actorRole, targetRole, nextRole }) => (
+  actorRole === "OWNER"
+  && (targetRole === "MANAGER" || targetRole === "MEMBER")
+  && (nextRole === "MANAGER" || nextRole === "MEMBER")
+);
